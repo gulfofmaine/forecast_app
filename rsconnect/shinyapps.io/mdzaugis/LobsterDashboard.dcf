@@ -1,0 +1,13 @@
+name: LobsterDashboard
+title: LobsterDashboard
+username:
+account: mdzaugis
+server: shinyapps.io
+hostUrl: https://api.shinyapps.io/v1
+appId: 2629638
+bundleId: 3562230
+url: https://mdzaugis.shinyapps.io/LobsterDashboard/
+when: 1598499396.98132
+asMultiple: FALSE
+asStatic: FALSE
+ignoredFiles: app_run.R|Dockerfile|OISST_extract.R|OISST_to_zones.Rmd|README.md

@@ -10,13 +10,38 @@ library(leaflet)
 library(plotly)
 
 
+# Lobster landings start dates by zone calculated from defineStartDate.R
 zone_strt <- read_csv(here::here("Data/zoneStrt.csv"))
+
+# Average sst by lobster zone (OISST)
 All_Zone_avgs <- read_csv(here::here("Data/All_Zone_avgs.csv")) %>% mutate(zone_avg = zone_avg*(9/5)+32)
 
 All_Zone_avgs_mon <- All_Zone_avgs%>% mutate(mon = month(t), yr = year(t)) %>%
   group_by(mon, yr, zone) %>% summarise(zone_avg = mean(zone_avg, na.rm = TRUE), .groups = "drop") %>% 
   mutate(t = as.Date(paste(yr, mon, "01", sep = "-"))) %>% dplyr::select(t, zone, zone_avg) %>% ungroup()
 
+cmipsst <- read_csv("Data/CMIPSSTProjections.csv") %>% 
+  mutate(Mean = Mean*(9/5)+32,
+         low = low*(9/5)+32,
+         high = high*(9/5)+32) %>% mutate(Year = year(Date), mon = month(Date)) %>% 
+  filter(mon %in% c(7,8,9)) %>% group_by(Year) %>% 
+  dplyr::summarise(Mean = mean(Mean), 
+                   low = mean(low),
+                   high = mean(high),
+                   .groups = "drop")
+
+# Multi decadal lobster population projection
+lob_pop_proj <- read_csv("Data/Landings_predictions.csv")
+
+lob_abun <- read_csv("Data/ASMFC.csv")
+
+lob_pop_proj <- left_join(lob_pop_proj, lob_abun, by = "Year")
+
+gom_oisst_df <- read_csv("Data/gom_oisst.csv") %>% mutate(Year = year(Date), mon = month(Date)) %>% 
+  filter(Year > 1981, Year < 2020, mon %in% c(7,8,9)) %>% group_by(Year) %>% 
+  dplyr::summarise(Avg = mean(gom_oisst)*(9/5)+32, .groups = "drop")
+
+# Average bottom temperature for lobster zone (FVCOM)
 FVCOM_Zone_avgs <- read_csv(here::here("Data/FVCOM_Zone_avgs.csv")) %>% mutate(zone_avg = zone_avg*(9/5)+32)
 
 surNbot <- FVCOM_Zone_avgs %>% mutate(mon = month(t), yr = year(t)) %>% dplyr::select(-t)
@@ -24,24 +49,30 @@ surNbot <- FVCOM_Zone_avgs %>% mutate(mon = month(t), yr = year(t)) %>% dplyr::s
 surNbot <- All_Zone_avgs_mon %>% mutate(mon = month(t), yr = year(t)) %>% dplyr::select(-t, "sur" = zone_avg, zone, mon, yr) %>% 
   left_join(., surNbot, by = c("mon", "yr", "zone")) %>% rename("bot" = zone_avg)
 
+# yearly total lobster landings in Maine
 yr_lob_landings <- read_csv("Data/Yearly_lob_landings.csv")
 
+# Lobster center of biomass
 lob_movement <- read_csv("Data/Lobster_movement.csv") %>% filter(`Common name` == "American lobster")
 
+# Lobster landings start date for total maine landings
 gom_strt <- read_csv("Data/pwrDstrt2.csv") %>% rename("Year" = year)
+
+# monthly lobster landed in Maine
 mon_landings <- read_csv("Data/Month_lob_price.csv")
 
-forecasts <- read_csv("Data/Forecasts.csv")%>% 
+# Seasonal forecasts
+forecasts <- read_csv("Data/Forecasts_for_app.csv")%>% 
   pivot_longer(., cols = c(-Year, -Forecast_Date, -Yrday), names_to = "strtbin", values_to = "Percent")
 
-buoy_data <- read_csv("Data/Buoy_data.csv") %>% filter(Variable == "temp") %>% mutate(mon = month(Date), yr = year(Date)) %>%
-  group_by(name, Type, Depth, mon, yr) %>% add_tally() %>% 
-  ungroup() %>% filter(n >=22) %>%
-  group_by(name, Type, Depth, mon, yr) %>% dplyr::summarise(Values = mean(Values, na.rm = TRUE), .groups = "drop") %>% 
-  group_by(name, Type, Depth, yr) %>% add_tally() %>% ungroup() %>% filter(n>=9) %>%
-  group_by(name, Type, Depth, yr) %>% dplyr::summarise(Values = mean(Values, na.rm=TRUE), .groups = "drop")
+#buoy_data <- read_csv("Data/Buoy_data.csv") %>% filter(Variable == "temp") %>% mutate(mon = month(Date), yr = year(Date)) %>%
+#  group_by(name, Type, Depth, mon, yr) %>% add_tally() %>% 
+#  ungroup() %>% filter(n >=22) %>%
+#  group_by(name, Type, Depth, mon, yr) %>% dplyr::summarise(Values = mean(Values, na.rm = TRUE), .groups = "drop") %>% 
+#  group_by(name, Type, Depth, yr) %>% add_tally() %>% ungroup() %>% filter(n>=9) %>%
+#  group_by(name, Type, Depth, yr) %>% dplyr::summarise(Values = mean(Values, na.rm=TRUE), .groups = "drop")
   
-
+# lobster zone shp file
 Lob_zone_sf_simple <- st_read(here::here("Data/Lob_zone_sf.shp")) %>% st_transform(crs = '+proj=longlat +datum=WGS84') 
 
 zone_strt_temp_all <-  All_Zone_avgs %>% mutate(yr = year(t), yrday = yday(t)) %>% 
@@ -49,6 +80,7 @@ zone_strt_temp_all <-  All_Zone_avgs %>% mutate(yr = year(t), yrday = yday(t)) %
   na.omit() %>% 
   rename("id" = zone)
 
+# monthly lobster landings by zone
 lob_zone_landing <- read_csv("Data/lob_zone.csv")
 
 lob_zone_landing <- lob_zone_landing %>% 
@@ -69,7 +101,7 @@ zone_strt_temp <-  All_Zone_avgs %>% mutate(yr = year(t), yrday = yday(t)) %>%
 zone_strt_temp <- st_as_sf(zone_strt_temp)
 
 Zone_index <- c("Zone A" = "A", "Zone B" = "B", "Zone C" = "C", "Zone D" = "D",
-                "Zone E" = "E", "Zone E" = "E", "Zone F" = "F", "Zone G" = "G")
+                "Zone E" = "E", "Zone F" = "F", "Zone G" = "G")
 
 coefs <- lob_zone_landing %>% group_by(month, zone) %>%
   summarise(avgs = mean(pounds), .groups = "drop") %>%
@@ -79,6 +111,18 @@ gom_coast <- All_Zone_avgs %>% mutate(month = month(t)) %>%
   left_join(coefs, by = c("month", "zone")) %>%
   group_by(t) %>% 
   summarise(Avg = weighted.mean(zone_avg, w = wt), .groups= "drop")
+
+# multi year forecast data
+multi_year <- read_csv("Data/multi_year_forecast.csv") 
+multi_year$`10th` <- multi_year$`10th`/1000000
+multi_year$`25th` <- multi_year$`25th`/1000000
+multi_year$`75th` <- multi_year$`75th`/1000000
+multi_year$`90th` <- multi_year$`90th`/1000000
+multi_year$Median <- multi_year$Median/1000000
+
+# yearly landings by zone
+yr_zone_landings <- read_csv("Data/Zone_Landings_year.csv")
+yr_zone_landings$Landings <- yr_zone_landings$Landings/1000000
 
 years <- seq(2002,2019,1)
 names(years) <- seq(2002,2019,1)
@@ -121,35 +165,39 @@ ui <- fluidPage(
                             margin: 0 auto;
                             padding: 0;
                             }
-                           p{font-size: 16px}
-                           ul{font-size: 16px}
-                           h6{font-size: 14px}
+                           p{font-size: 18px}
+                           ul{font-size: 18px}
+                           h1{font-size: 34px}
+                           h2{font-size: 30px}
+                           h3{font-size: 28px}
+                           h4{font-size: 20px}
+                           h6{font-size: 18px}
                            @media screen and (min-width: 1300px){
                            .container-fluid{
                               width: 1300px;
                            }
                            }"))),
-  titlePanel("Climate and Fisheries Dashboard"),
+  titlePanel(tags$h1("Climate and Maine's lobster fishery"), windowTitle = "LobsterDashboard"),
   fluidRow(
     column(
       width = 12,
-      tags$h1("Purpose"),
+      tags$h2("Purpose"),
       tags$p("This dashboard provides access to data on ocean temperatures and landings in Maine’s lobster fishery. 
-             Use the prompts to explore the relationships between lobster landings and water temperature, 
-             as well as how temperature can be used to project Maine’s lobster landings into the future.")
+             Use the prompts to explore relationships between lobster landings and water temperature, 
+             as well as how temperature changes may affect Maine's lobster landings in the future.")
     )
   ),
   
   fluidRow(
     column(width = 12,
-           tags$h1("Overview"),
+           tags$h2("Overview"),
            tags$p("The fishery for American lobster (Homarus americanus) is one of the most valuable in the United States, 
                      and the fishery is especially important in the state of Maine.  
-                     80% of all US lobsters are landed in Maine, 
-                     and the lobster fishery accounts for 78% of all fishery landings in the state.  
-                     The high dependence of Maine’s coastal economy on this single fishery means that even small 
-                     changes in the volume of lobster landings have a large impact in the region.  
-                     Ocean temperatures have been trending upwards in the Gulf of Maine, and rising temperatures
+                     Ninety percent of the volume of U.S. lobster landings are from the Gulf of Maine and 
+                     80% from Maine alone. In Maine, the lobster fishery accounts for 78% of all fishery landings in the state.  
+                     The high dependence of Maine’s coastal economy on this single fishery means that 
+                     changes in the volume of lobster landings have a large impact in the state's coastal communities."),
+           tags$p("Ocean temperatures have been trending upwards in the Gulf of Maine, and rising temperatures
                      affect lobster landings in multiple ways and at multiple time scales, including:"), 
            tags$ul(
              tags$li("Seasonal: The timing of spring warming influences when lobsters become active (and therefore more catchable) 
@@ -159,19 +207,22 @@ ui <- fluidPage(
                            influences the number of lobsters that will mature into harvestable sizes in any given year."),
              tags$li("Multi-decadal: Temperature also influences the recruitment of lobsters. 
                      Over multiple generations directional changes in recruitment affect the size of the lobster population and the associated sustainable catch levels.")),
-           tags$p("Maine is divided into seven Lobster Management Zones (Figure 1). 
-           Each zone has a set of regulations that control the commercial harvest of lobsters.",
-                  tags$a(href="https://www.maine.gov/dmr/about/councils/lobzones/index.html", "Management Zone Councils"), 
+           tags$p("Maine's lobster fishery is co-managed by the state's Department of Marine Resources and councils composed
+           of lobster license holders that represent each of seven Lobster Management Zones (Figure 1). 
+           Each zone has a set of regulations that controls the commercial harvest of lobsters.",
+                  tags$a(href="https://www.maine.gov/dmr/about/councils/lobzones/index.html", "Lobster Zone Councils"), 
                   " help tailor state-wide regulations to the conditions within each distinct zone."))),
   fluidRow(
     column(
       width = 12,
+      align="center",
       leafletOutput(outputId = "Lob_zone_map", height = "600px", width = "600px")
     )
   ),
   fluidRow(
     column(
       width = 6,
+      offset = 3,
       tags$h6("Figure 1: Maine Lobster Management Zones. There are seven zones lettered alphbetically from Zone A in the east to zone G in the west.")
     )
   ),
@@ -181,14 +232,14 @@ ui <- fluidPage(
   fluidRow(
     column(
       width = 12,
-      tags$h4("Explore historical data or future projections")
+      tags$h4("Explore historical data or temperature-to-lobster relationships")
     )
   ),
   
   fluidRow(
     column(
       width = 12,
-      selectInput(inputId = "time_period", choices = c("Choose One" = "", "Historical" = "hist", "Projection" = "proj"), label = "Select a time period")
+      selectInput(inputId = "time_period", choices = c("Choose One" = "", "Historical" = "hist", "Future" = "proj"), label = "Select a time period")
     )
   ),
   
@@ -225,9 +276,9 @@ server <- function(input, output, session) {
                     legend.key = element_rect(fill = NA), 
                     legend.direction = "horizontal",
                     axis.title = element_text(size = 18),
-                    axis.text = element_text(size=14), 
-                    legend.text = element_text(size = 12),
-                    legend.title = element_text(size = 12)))
+                    axis.text = element_text(size=16), 
+                    legend.text = element_text(size = 14),
+                    legend.title = element_text(size = 14)))
   
   output$time_period_ui <- renderUI({
     if (is.null(input$time_period))
@@ -239,8 +290,8 @@ server <- function(input, output, session) {
       "hist" = fluidRow(
         column(
           width = 12,
-          tags$h4("Are you interested in landings or temperature?"),
-          selectInput(inputId = "indicators", label = "Indicator", choices = c("Choose One" = "", "Temperature" = "temp", "Landings" = "land"),
+          tags$h4("Are you interested in temperature or landings?"),
+          selectInput(inputId = "indicators", label = "Variable", choices = c("Choose One" = "", "Temperature" = "temp", "Landings" = "land"),
                       selected = NULL)
         )
       ),
@@ -248,8 +299,8 @@ server <- function(input, output, session) {
       "proj" = fluidRow(
         column(
           width = 12,
-          tags$h4("Which forecast do you want to explore?"),
-          selectInput(inputId = "forecasts", label = "Forecast", choices = c("Choose One" = "", "Seasonal" = "season", "Multi-year" = "annual", "Muli-decadal" = "multi_decadal"),
+          tags$h4("Which relationship do you want to explore?"),
+          selectInput(inputId = "forecasts", label = "Relationship", choices = c("Choose One" = "", "Seasonal" = "season", "Multi-year" = "annual", "Multi-decadal" = "multi_decadal"),
                       selected = NULL)
         )
       )
@@ -269,7 +320,7 @@ server <- function(input, output, session) {
                       tags$h1("Temperature Explorer"))),
              fluidRow(
                column(width = 12,
-                      tags$p("Ocean temperature in the Gulf of Maine has risen rapidly over the past twenty years. 
+                      tags$p("Ocean temperature in the Gulf of Maine has risen rapidly over the past 15 years. 
                       This increase in temperature has occurred both at the surface and at depth (Figure T1)."))),
              fluidRow(
                column(
@@ -280,48 +331,51 @@ server <- function(input, output, session) {
              fluidRow(
                column(
                  width = 12,
-                 tags$h6("Figure T1: Yearly averaged surface and bottom temperature for the coastal Gulf of Maine region. 
+                 tags$h6("Figure T1: Yearly averaged surface and bottom temperature for Maine's lobster management zones. 
                          The horizonal line is the average temperature for the specified depth across the entire time series.")
                )
              ),
              fluidRow(
                column(width = 12,
-                               tags$p("Ocean temperautre has a strong seasonality, with the coldest water occuring in March,
-                               and the warmest water occuring in August (Figure T2).
-                               Spring time ocean temperature, during the months of March and April, is a good 
-                               predictor of the timing of the summer transition to high-volume landings in Maine’s lobster fishery. 
-                               This lobster-landings transition period, when lobsters become more available to the fishery, 
-                               occurs in the early summer as lobsters move more actively and molt into harvestable size classes.
-                                       The interactive graphs below can be used to observe differences in sea 
+                      tags$p("Ocean temperature has a strong seasonality, with the coldest water occurring in March,
+                               and the warmest water occuring in August (Figure T2, Observed).
+                               When temperature is viewed as anomalies (difference from average), yearly and multi-year patterns are more noticeable (Figure T2, Anomalies)."), 
+                      tags$p("The interactive graphs below can be used to observe differences in sea 
                                        surface and bottom temperature in each of Maine’s lobster management zones 
-                                       over time (top panel) and within the annual cycle of individual years (bottom panel).  
-                                       Sea surface temperatures from March 8 through April 20 are the strongest predictors 
-                                       of the timing of the lobster landings transition date ",
-                        tags$a(href="https://www.frontiersin.org/articles/10.3389/fmars.2017.00337/full", "(Mills et al. 2017).")), 
-                               tags$p("The graph below is interactive. Use the radio buttons to select surface or bottom temperature as 
-                                       well as observed temperature (raw temperature) or temperature anomalies 
-                                       (difference from long-term average from 1981-2011) for the full time series (top panel) or by years (bottom panel).
-                                       The legend of the graph is interactive.  In the top panel, each of the lobster zones is selectable by clicking on 
+                                       over time (top panel) and within the annual cycle of individual years (bottom panel).
+                                       Use the radio buttons to select surface or bottom temperature as 
+                                       as observed temperature or temperature anomalies 
+                                       (difference from 1981-2011 long-term average). 
+                                       Monthly and seasonal temperature averages are available.
+                                       The legend of the graph is also interactive. In the top panel, each of the lobster zones is selectable by clicking on 
                                        the zone in the legend to remove the zone or double clicking to isolate the zone.  
                                        For the bottom panel, the years are interactive in a similar manner, and lobster zones of interest can be selected 
-                                       from the drop-down menu above the graph. Sea surface temperature data are from", 
+                                       from the drop-down menu above the graph."),
+                      tags$p("Sea surface temperature data are from", 
                                        tags$a("https://psl.noaa.gov/data/gridded/data.noaa.oisst.v2.html", "NOAA OISST V2")," and 
-                                      bottom temperature data are from ", tags$a("http://fvcom.smast.umassd.edu/necofs/","FVCOM NECOFS model")," ."))),
+                                      bottom temperature data are from ", tags$a("http://fvcom.smast.umassd.edu/necofs/","FVCOM NECOFS model")," ."),
+                      tags$br())),
              
              fluidRow(
                column(width = 12,
                       fluidRow(
                         column(
-                          width = 6,
-                          title = "Surface and Bottom Temperature",
-                          radioButtons("sur_bot", "Select Depth",
+                          width = 4,
+                          radioButtons("sur_bot", "Depth",
                                        choices = c("Surface Temperature" = "Yearday", "Bottom Temperature" = "Month"))
                         ),
                         column(
-                          width = 6,
-                          title = "Data type",
-                          radioButtons("vis", "Select Data format",
-                                       choices = c("Observed" = "raw_temp", "Anomalies" = "anom")))),
+                          width = 4,
+                          radioButtons("vis", "Data format",
+                                       choices = c("Observed" = "raw_temp", "Anomalies" = "anom"))),
+                        column(
+                          width = 4,
+                          selectInput("season_sel", "Season", choices = c("Monthly" = "Monthly",
+                                                                          "Winter" = "Winter",
+                                                                          "Spring" = "Spring",
+                                                                          "Summer" = "Summer",
+                                                                          "Fall" = "Fall"))
+                        )),
                       plotlyOutput(outputId = "plotly_lob_zone"))),
               fluidRow(
                column(width = 12,
@@ -331,7 +385,13 @@ server <- function(input, output, session) {
                           title = "Zone",
                           selectInput("zones", "Select Lobster Zone",
                                       choices = Zone_index))),
-                      plotlyOutput(outputId = "yrDay_plot")))),
+                      plotlyOutput(outputId = "yrDay_plot"))),
+             fluidRow(
+               column(
+                 width = 12,
+                 tags$h6("Figure T2: Annual cycles of temperature in Maine's lobster management zones.")
+               )
+             )),
            
            
            "land" = column(
@@ -343,9 +403,12 @@ server <- function(input, output, session) {
              fluidRow(
                column(
                  width = 12,
-                 tags$p("Lobster landings in the state of Maine have risen steadily since the mid-1980s (Figure L1, left panel). 
-                        A large portion of this increase in lobster landings is attributed to 
-                        the warming Gulf of Maine, which has caused a northward shift and enhanced productivity of the lobster population (Figure L1, right panel)."))),
+                 tags$p("Lobster 'landings' represent lobsters that are caught, brought to shore, and sold by the harvester. 
+                 Lobster landings in the state of Maine have risen steadily since the mid-1980s (Figure L1, left panel). 
+                        A large portion of this increase is attributed to 
+                        the warming Gulf of Maine, which has caused a northward shift and 
+                        enhanced productivity of the lobster population and contributed to a northward shift in the 
+                        location of lobster in Northeast U.S. waters (Figure L1, right panel)."))),
              fluidRow(
                column(
                  width = 6,
@@ -366,10 +429,11 @@ server <- function(input, output, session) {
              fluidRow(
                column(
                  width = 12,
-                 tags$p("Lobster landings have seasonality (Figure L2). 
+                 tags$br(),
+                 tags$p("Lobster landings do not occur consistently over the course of a year, but instead display a strong seasonality (Figure L2). 
                         There is a low landings period during the winter months, and a high landings period from the summer into the fall.
-                        The transition from the low landings season to the high landings season happens in the late spring or early summer depending
-                        on the water temperatures for that location and year.")
+                        The transition from the low landings season to the high landings season happens in the late spring or early summer, 
+                        and the timing is influenced by water temperatures in that location and year.")
                )
              ),
              fluidRow(
@@ -381,20 +445,21 @@ server <- function(input, output, session) {
              fluidRow(
                column(
                  width = 12,
-                 tags$h6("Figure L2: Seasonality and yearly differences in lobster landings from Lobster Management Zone C. The year 2016 had an earlier transition to the high summer
-                         landings period than 2011 (indicated by the arrow).")
+                 tags$h6("Figure L2: Yearly differences in seasonality of lobster landings from Lobster Management Zone C. The year 2016 had an earlier transition to the high summer
+                         landings period than 2014 (indicated by the arrow).")
                )
              ),
              fluidRow(
                column(
                  width = 12,
+                 tags$br(),
                  tags$p("Use the interactive graph below to observe the change in landings for each zone through time. Notice how there is both 
                  a seasonal cycle and multi-year trend in landings. Use the radio buttons to select
                  the view as monthly or yearly averages for the full time series (on the top) or flip through the different lobster zones 
                  to see how the seasonal cycles compare between years (on the bottom). 
                  The legend of the graph is interactive and each of the lobster zones and years are selectable by clicking on the
                         zone in the legend to remove the zone or doubling clicking to isolate the zone. 
-                        Landings data are from Maine DMR."))),
+                        Landings data are from Maine Department of Maine Resources."))),
              fluidRow(
                column(
                  width = 6,
@@ -428,7 +493,7 @@ server <- function(input, output, session) {
         width = 12,
         fluidRow(
           column(width = 12,
-                 tags$h1("Seasonal Forecast"),
+                 tags$h1("Seasonality of lobster landings"),
                  tags$p("Lobster landings can increase dramatically in a short period of time, 
                     and the transition period from the low winter landings to the high summer landings 
                     is important for the lobster fishery (Figure S1). 
@@ -439,9 +504,10 @@ server <- function(input, output, session) {
                     The volume of lobster landed increases as all these conditions align and 
                     lobsters become more readily harvested by the coastal fishery."), 
                  plotOutput(outputId = "transition_gom"),
-                 tags$h6("Figure S1: Seasonality and yearly differences in lobsters landed in Maine. 
+                 tags$h6("Figure S1: Seasonality and yearly differences in lobster landings in Maine. 
                  The vertical lines indicate the timing of the transition date for 2014 (red) and 
                  2016 (blue). 
+                 This date is determined as a point when the landings have clearly started to increase for the season (for more details, see Mills et al. 2017).
                  The year 2016 had an earlier transition to the high summer
                          landings period than 2014 (indicated by the arrow)."),
                  tags$p("This transition to the high-landings summer period typically happens in late June 
@@ -449,33 +515,67 @@ server <- function(input, output, session) {
                     plays a role in determining when this transition happens, and there is a lagged 
                     relationship between spring water temperatures and the timing of the transition date.  
                     Thus, early spring ocean temperatures can be used to calculate the timing of the uptick 
-                    in landings associated with this transition."))),
+                    in landings."))),
         fluidRow(
           column(
             width = 12,
             tags$h3("How do the transition periods compare to springtime temperature?"),
-            tags$p("Use the widget below to compare the water temperature and state-wide transition dates of different years. 
-                   Notice how the patterns between the temperature (on the left) and lobster landings transition period (on the right) are similar
-                   when new data points are added. 
+            tags$p("Use the widget below to compare the water temperature and statewide transition dates of different years. 
+                   Notice how the patterns between the temperature (black line) and lobster landings transition period (red line) are similar. 
                    Years with warmer temperatures also tend to have earlier transition dates.")
+          )
+        ),
+        fluidRow(
+          column(
+            width = 6,
+            checkboxInput("transition_date_switch", "Show Transition Day", value = TRUE)
+          ),
+          column(
+            width = 12,
+            plotOutput("transition_date")
           )
         ),
         
         fluidRow(
           column(
             width = 12,
-            selectInput("Year_compare", label = "Select Year",
-                        choices = c("Choose One" = "", years), multiple = TRUE)
+            tags$h3("How do past statewide forecasts compare to the actual transition period?"),
+            tags$p("Use the widget below to see how the actual lobster landings transition date in the state of Maine align with the 
+                   forecasted transition period, based on the temperature-transition day relationship shown above. 
+                   The vertical red line is the observed transition date and the black dots are the monthly landings.
+                   The forecast is run many times over different sets of data to create a range of possible transition dates. 
+                   The color bar shows the percent of forecast runs that align on the same week. 
+                   The darker the color, the higher chance the transition day will occur during that week. The tool allows you
+                   to change the year and the date of the forecast. The forecast might change depending on the forecast date. 
+                   If the current year is shown, only the forecast is shown. 
+                   Current year landings and actual transition date become available the following year.")
           )
         ),
         fluidRow(
           column(
-            width = 6,
-            plotOutput("spring_temp")
+            width = 4,
+            radioButtons("forecast_date", "Select Forecast Date",
+                        choices = c("March 1" = "03-01",
+                                    "March 15" = "03-15",
+                                    "April 1" = "04-01",
+                                    "April 15" = "04-15",
+                                    "May 1" = "05-01"),
+                        inline = TRUE)),
+          column(
+            width = 4,
+            sliderInput("Year", label = "Select Year",
+                        min = 2004, max = 2020, value = 2014, sep = "")
           ),
           column(
-            width = 6,
-            plotOutput("transition_date")
+            width = 4,
+            checkboxInput("actual", label = "Actual Transition Date", value = TRUE),
+            checkboxInput("forecast", label = "Forecasted Transition Date", value = TRUE)
+          )
+        ),
+        fluidRow(
+          column(
+            width = 12,
+            plotOutput("Strt_day_forecast")
           )
         ),
         fluidRow(
@@ -493,26 +593,26 @@ server <- function(input, output, session) {
                            tags$p("The top left graph shows the relationship between the average sea surface 
                                         temperature of a lobster zone on a specific date and the 
                                         date of the low-to-high landings transition. As you can see, 
-                                        sea surface temperature in the spring can be used to predict the 
-                                        transition period between the winter and summer landings.
-                                        The date slider allows you to switch between different dates, and the lobster zone 
-                                        selection input changes the lobster zone. 
+                                        warmer spring sea surface temperatures are associated with earlier landings transition dates. 
+                                        This relationship can be used to predict the 
+                                        transition period between the winter and summer landings based on earlier spring temperatures.
+                                        The date slider shows the temperature-transition date relationship for different days, 
+                                        and the lobster zone selection input changes the lobster zone. 
                                         Each zone has its own relationship between springtime water temperature 
-                                        and lobster landings. 
-                                        "),
-                           tags$p("The bottom graph shows the time series of the correlation between the average sea surface 
-                                        temperature and the inflection point between the winter and summer landings period. In this graph, the 
+                                        and lobster landings."),
+                           tags$p("The bottom graph shows the correlation between the average sea surface 
+                                        temperature and the transition date for January to June. In this graph, the 
                                         peak of the curve indicates the best spring date for predicting the landings transition date."),
                            tags$p("For most lobster zones, the correlation peaks between March 15th and March 25th."))))),
                  fluidRow(
                    column(
                      width = 4,
                      title = "Predictor Date Input",
-                     sliderInput("strt_day_period", "Date",
+                     sliderInput("strt_day_period", "Forecast Date",
                                  min = as.Date("2000-01-01"),
                                  max = as.Date("2000-04-30"),
                                  value = as.Date("2000-03-15"), 
-                                 timeFormat = "%d-%B")),
+                                 timeFormat = "%d-%b")),
                    column(
                      width = 4,
                      title = "Zone",
@@ -538,47 +638,168 @@ server <- function(input, output, session) {
         fluidRow(
           column(
             width = 12,
-            tags$p("Each year, approximately 85% of Maine’s lobster harvest is comprised of new recruits to the fishery. 
-              Due to regional and interannual differences in temperature-dependent growth rates, 
-              lobsters take anywhere from 5 to 10 years to enter the fishery after their larvae repopulate coastal nurseries.
+            tags$p("Each year, approximately 85% of Maine’s lobster harvest is comprised of new recruits to the fishery (",
+            tags$a(href = "https://www.asmfc.org/uploads/file//55d61d73AmLobsterStockAssmt_PeerReviewReport_Aug2015_red2.pdf", "ASMFC 2015"),
+            "). Due to regional and interannual differences in temperature-dependent growth rates, 
+              lobsters take anywhere from 5 to 10 years to enter the fishery after their larvae populate coastal nurseries.
               Annual surveys of newly settled lobsters conducted through the ",
             tags$a(href="https://umaine.edu/wahlelab/american-lobster-settlement-index-alsi/", "American Lobster Settlement Index"), 
-            "offer the potential to give the industry and managers an early warning of the strength of upcoming year classes. 
+            "(ALSI) offer the potential to give the industry and managers an early indication of the strength of upcoming year classes. 
+            The settlement monitoring that feeds into the ALSI has a large geographic range, 
+                   stretching beyond Maine's lobster zones into southern New England, New Brunswick and Nova Scotia (Figure Y1).
               Observations of annual settlement and estimates of growth and mortality can be used to track the fate of each year 
-              class and estimate the abundance of recruits entering the fishery each year."))),
+              class and estimate the abundance of recruits entering the fishery each year. 
+            The relationship between lobster recruitment into the fishery and landings can then be used 
+            to project future landings (see ", 
+            tags$a(href = "https://esajournals.onlinelibrary.wiley.com/doi/full/10.1002/eap.2006", "Oppenheim et al. 2019"), 
+            " for details)."))),
         fluidRow(
           column(
             width = 12,
-            imageOutput("multiyear")
+            img(src = "ALSI_map.png"),
+            tags$h6("Figure Y1. ALSI sampling locations in New England and Atlantic Canada. Red dots indicate diver-based suction sampling and 
+                    yellow dots indicate vessel-deployed bio-collector.")
           )
-        )),
+        ),
+        fluidRow(
+          column(
+            width = 12,
+            tags$h3("Projecting lobster landings six years into the future"),
+            tags$p("In each plot in the section below, black dots connected by the line are the observed lobster landings for each year. 
+                   The red line represents predicted recruitment values for each year derived from a model based on observed larval settlement 
+                   and subsequent growth and mortality. 
+                   The model is run 'backwards' (hindcast, blue shaded area) over the observed data to translate and scale 
+                   the recruitment to landings. Using this information, the model is projected forward in time (forecast, orange shaded area). 
+                   The dark shaded areas show the 25-75 percentiles, and the light shaded areas show the 10-90 percentile, 
+                   meaning you would expect 50% of the data to fall within the dark shaded area and 80% of the data to fall within the light shaded area. 
+                   You can use the drop down menus below to view the 2020-2025 forecast for lobster zones in which we have the ability to make a skillful forecast.")
+          )
+        ),
+        fluidRow(
+          column(
+            width = 12,
+            selectInput("study_area", "Study Area", c("Zone A (Jonesport, ME)" = "A",
+                                                      "Zone B (Mount Desert Island, ME)" = "B",
+                                                      "Zone C (Penobscot Bay East, ME)" = "C",
+                                                      "Zone D (Penobscot Bay West, ME)" = "D",
+                                                      "Zone E (Midcoast, ME)" = "E",
+                                                      "Zone F (Casco Bay, ME)" = "F"),
+                        selected = "A")
+          )),
+        fluidRow(
+          column(
+            width = 12,
+            plotOutput("multiyear", height = "525px")
+          )),
+        fluidRow(
+          column(
+            width = 12,
+            tags$h6("Predictive model forecasts for study areas with significant recruitment index-to-landings 
+                   relationships using the best-fitting models. Observed (black line) and predicted (red line) lobster landings, hindcasts (blue), 
+                   and forecasts from 2019 forward (orange) with 25–75% (dark shaded) and 10–90% (light shaded) quantiles (",
+                    tags$a(href = "https://esajournals.onlinelibrary.wiley.com/doi/full/10.1002/eap.2006", "Oppenheim et al. 2019"), ").")
+          )),
+        fluidRow(
+          column(
+            width = 12,
+            tags$h3("How does the model work?"),
+            tags$p("Ocean temperature and other environmental variables, affect lobster growth and mortality.
+                   Using those environmental relationships, we can predict how long it will take newly settled, 
+                   young-of-year lobsters to grow into a harvestable size. 
+                   Pairing this knowledge with the data from the American Lobster Settlement Index, 
+                   we can calculate and project the recruitment index forward about six years."),
+            tags$p("We can assess the predictive capabilities of the model by 
+            selecting only the data before 2014 to use to develop a model of recruitment 
+            based on settlement observations. 
+            If the initial recruitment model fits the observed data, then we are able to make a prediction out about six years. 
+            We can then compare these predictions to observed landings and evaluate how well the model performs, which we call its predictive 'skill'."),
+            checkboxInput("ALSI_skill_select", label = "Show forecast", value = FALSE),
+            plotOutput("ALSI_skill"),
+            tags$h6("Assessing model skill by comparing model predictions of landings to actual observations."),
+            tags$br(),
+            tags$h4("How do the forecasts change through time?"),
+            tags$p("These forecasts take in new data each year and adjust the predictions accordingly. 
+                   Using the interactive graphs below, you can change the forecast date to see how well the models performed in forecasting future landings.")
+          )
+        ),
+        fluidRow(
+          column(
+            width = 12,
+            sliderInput("alsi_forecast_date", "Forecast Date", 
+                        min = 2013, max = 2019, value = 2013, 
+                        sep = "", step = 1)
+          )
+        ),
+        fluidRow(
+          column(
+            width = 12,
+            plotOutput("multi_year_assessment")
+          )
+        ),
+        fluidRow(
+          column(
+            width = 12,
+            tags$h6("Observed (black line and dots) and predicted (red line) lobster landings. Hindcasts (blue), 
+                   and forecasts (orange) with 25–75% (dark shaded) and 10–90% (light shaded) quantiles are made starting from the selected date. 
+                   Faded dots not included in the forecast as they were collected after the forecast was made. 
+                    These observations can be used to assess the model's skill.")
+          )
+        )
+        ),
       
       "multi_decadal" = column(
         width = 12,
         fluidRow(
           column(
             width = 12,
-            tags$h1("Multi-decadal Population Trends"))),
+            tags$h1("Multi-decadal Trends"))),
         fluidRow(
           column(
             width = 12,
-            tags$p("Rising ocean temperatures can affect multiple biological processes in lobster but have a particularly strong effect on their survival through the first year of life.  
-              Survival of during the first year is enhanced around optimal summer temperatures of approximately 16 C.  
+            tags$p("Rising ocean temperatures can affect multiple biological processes in lobster, 
+            but they exert particularly strong effect on lobster survival through the first year of life.  
+              Survival of during the first year is enhanced by optimal summer temperatures of approximately 60 degrees F.  
               Recent temperatures in the Gulf of Maine near this optimum have boosted Gulf of Maine lobster abundance, 
               but as temperatures have exceeded this optimum in Southern New England, the lobster population has declined.  
-              Future temperatures in Gulf of Maine are projected to exceed this preferred temperature and are expected to influence population trajectories for the lobster population."),
-            tags$p("The interactive graph below can be used to explore projected estimates of the Gulf of Maine lobster 
-                   population under a range of future temperatures"))),
+              Future temperatures in Gulf of Maine are projected to exceed this preferred temperature and are expected to 
+                   influence population trajectories for the lobster population."))),
         fluidRow(
           column(
             width = 12,
-            imageOutput("multidecade")
+            checkboxInput("cmip_proj", "Summertime Temperature Projections to 2050"),
+            plotOutput("temp_landings_trends")
           )
         ),
         fluidRow(
           column(
             width = 12,
-            tags$p("Projections of American lobster abundance. Estimated abundance from 1985 to 2050 for the GoM")
+            tags$h6("Trends in summertime sea surface temperature (dark blue line) in the Gulf of Maine from 
+            1982 to 2020 and lobster landings (black dots) in the state of Maine. 
+                    The 'Temperature Projections to 2050' button reveals the 
+                    projected sea surface temperature to 2050 (light blue, shaded region is 95% confidence interval).")
+          )
+        ),
+        fluidRow(
+          column(
+            width = 12,
+            tags$p("Temperature can be used to predict the size of the lobster population. 
+            Using temperature projections through 2050, we can estimate the lobster population to that time. 
+            We can use the relationship between population and observed landings to then convert projected population to landings.
+            The interactive graph below can be used to explore projected estimates of the Gulf of Maine lobster 
+                   population and landings under the 'business as usual' climate change scenario (RCP 8.5)"))),
+        fluidRow(
+          column(
+            width = 12,
+            radioButtons("pop_landings", "Modeled data", choices = c("Population" = "pop",
+                                                                     "Landings" = "land")),
+            plotOutput("multidecade")
+          )
+        ),
+        fluidRow(
+          column(
+            width = 12,
+            tags$h6("Projections of American lobster abundance. Estimated abundance from 1985 to 2050 for the GoM. 
+                    The shaded region shows the 95% confidence intervals.")
           )
         )) 
     )}
@@ -595,7 +816,7 @@ server <- function(input, output, session) {
   ############################## LOBSTER ZONE MAP #############
   
   output$Lob_zone_map <- renderLeaflet({        
-    leaflet() %>% addTiles() %>% fitBounds(-70.5, 42.5, -66, 45) %>%
+    leaflet() %>% addProviderTiles(providers$Esri.NatGeoWorldMap) %>% fitBounds(-70.5, 42.5, -66, 45) %>%
       addPolygons(data = Lob_zone_sf_simple, fillColor = ~factpal(ZONEID), color = "transparent", fillOpacity = 1, layerId = ~ZONEID,
                   highlightOptions = highlightOptions(color = "white", 
                                                       weight = 2, bringToFront = TRUE),
@@ -627,12 +848,19 @@ server <- function(input, output, session) {
   ############################### SPRING TRANSITION ###########
   
   output$transition <- renderPlot({
-    lob_zone_landing %>% filter(zone == "C", year %in% c(2011, 2016)) %>% mutate(pounds = pounds/1000000) %>%
-      ggplot() + geom_line(aes(x = month, y = pounds, color = as.factor(year)), size = 3) +
+    mon_landings  %>%
+      mutate(t = as.Date(paste(Year,Month,"01", sep="-")), 
+             molen = days_in_month(t),
+             Date = as.Date(paste(Year, Month, molen, sep="-")),
+             yrday = yday(Date),
+             Pounds = Pounds/1000000) %>% 
+      filter(Year %in% c(2014, 2016)) %>%
+      left_join(., gom_strt, by = c("Year")) %>%
+      ggplot() + geom_line(aes(x = yrday, y = Pounds, color = as.factor(Year)), size = 3) +
       labs(x = "Month", y = "Landings (millions of pounds)", color = "Year")  +
-      scale_x_continuous(breaks = seq(1,12,1), 
+      scale_x_continuous(breaks = c(31, 60,91,121,152,182,213,244,274,305,335,366), 
                          labels = c("Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec")) +
-      geom_segment(aes(x = 7.2, y = 4.5, xend = 6.5, yend = 4.5, colour = "segment"),
+      geom_segment(aes(x = 217, y = 15, xend = 196, yend = 15, colour = "segment"),
                    arrow = arrow(), color = "black")
   })
   
@@ -649,7 +877,8 @@ server <- function(input, output, session) {
       geom_hline(aes(yintercept = yint, col = Depth)) +
       scale_x_continuous(breaks = seq(1985,2020,5)) +
       labs(x = "Year", y = "Temperature (deg F)") +
-      scale_color_discrete(labels = c("Surface", "Bottom"))
+      scale_color_discrete(labels = c("Bottom", "Surface")) +
+      guides(color = guide_legend(reverse = TRUE))
   })
   
   
@@ -658,14 +887,16 @@ server <- function(input, output, session) {
     
     if(input$sur_bot == "Yearday"){
       plot1 <- anom_fun(input_Data = All_Zone_avgs_mon, zones = input$zones, 
-                        vis = input$vis, sur_bot = input$sur_bot) + 
+                        vis = input$vis, sur_bot = input$sur_bot,
+                        season_sel = input$season_sel) + 
         theme(axis.title = element_text(size = 12),
               axis.text = element_text(size=10), 
               legend.text = element_text(size = 8),
               legend.title = element_text(size = 8))}
     if(input$sur_bot == "Month"){
       plot1 <- anom_fun(input_Data = FVCOM_Zone_avgs, zones = input$zones, 
-                        vis = input$vis, sur_bot = input$sur_bot) + 
+                        vis = input$vis, sur_bot = input$sur_bot,
+                        season_sel = input$season_sel) + 
         theme(axis.title = element_text(size = 12),
               axis.text = element_text(size=10), 
               legend.text = element_text(size = 8),
@@ -717,7 +948,7 @@ server <- function(input, output, session) {
     if(input$time_input == "Month"){
       plot1 <- lob_zone %>% ungroup() %>% mutate(Date = as.Date(paste(year, month, "01", sep = "-")), pounds = pounds/1000000) %>% ungroup %>%
         ggplot() + geom_line(aes(Date, pounds, color = id)) +
-        labs(title = "Total Catch", x= "Date", y = "Total Landings (millions of pounds)", color = "Lobster \n Zone")  +
+        labs(title = "Total Landings", x= "Date", y = "Total Landings (millions of pounds)", color = "Lobster \n Zone")  +
         scale_color_manual(values = c("#25356f",
                                       "#cb9d00",
                                       "#961e1d",
@@ -737,7 +968,7 @@ server <- function(input, output, session) {
   output$plotly_lob_landings_yday <- renderPlotly({
     plot1 <- lob_zone %>% filter(id == input$zone_bio) %>% mutate(pounds = pounds/1000000) %>%
       ggplot() + geom_line(aes(month, pounds, color = as.factor(year))) + 
-      labs(title = paste("Zone", input$zone_bio, "Catch", sep = " "), 
+      labs(title = paste("Zone", input$zone_bio, "Landings", sep = " "), 
            x = "Month", y = "Landings (millions of pounds)") +
       scale_x_continuous(breaks = c(seq(1,12,1)), 
                          labels = c("Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul",
@@ -753,28 +984,43 @@ server <- function(input, output, session) {
   
   ############################## TRANSITION_PLOTS #############################
   
-  output$spring_temp <- renderPlot({
-    if(is.null(input$Year_compare))
-      return()
-    gom_coast %>% mutate(Year = year(t), yrday = yday(t)) %>% 
-      filter(Year %in% input$Year_compare, yrday %in% c(60:121)) %>% 
-      group_by(Year) %>% summarise(Avg = mean(Avg, na.rm =TRUE)) %>%
-      ggplot() + geom_point(aes(y=Avg, group = Year, x = Year), size = 6) +
-      labs(x = "Year", y = "Temperature (deg F)")
-      
-  })
-  
+
   output$transition_date <- renderPlot({
-    if(is.null(input$Year_compare))
-      return()
-    gom_strt %>% 
-      dplyr::filter(Year %in% input$Year_compare) %>% 
-      ggplot() + geom_point(aes(x = Year, y = pwrDstrt2), size = 6) + 
-      labs(x = "Year", y = "Transition Date") +
-      scale_y_reverse(breaks = c(seq(135,230,5)), 
-                      labels = c("15-May","20-May","25-May","30-May","04-Jun","09-Jun","14-Jun","19-Jun", "24-Jun", 
-                                 "29-Jun", "04-Jul", "09-Jul", "14-Jul", 
-                                 "19-Jul", "24-Jul", "29-Jul", "03-Aug", "08-Aug", "13-Aug", "18-Aug"))
+    on_off <- paste(input$transition_date_switch)
+    
+    switch(on_off,
+           
+           "FALSE" =   gom_coast %>% mutate(Year = year(t), yrday = yday(t)) %>% 
+             filter(yrday %in% c(60:121)) %>% 
+             group_by(Year) %>% summarise(Avg = mean(Avg, na.rm =TRUE), .groups = "drop") %>% 
+             left_join(gom_strt, by = "Year") %>% 
+             ggplot() + geom_line(aes(x = Year, y = Avg), size = 4) +
+             labs(y = "Sea Surface Temperature (deg F)") +
+             scale_y_continuous(limits = c(37,43), 
+                                sec.axis = sec_axis(~((43 - (.-23))*7), name = "Transition Day",
+                                                    breaks = c(seq(135,230,5)), 
+                                                    labels = c("15-May","20-May","25-May","30-May","04-Jun","09-Jun","14-Jun","19-Jun", "24-Jun", 
+                                                               "29-Jun", "04-Jul", "09-Jul", "14-Jul", 
+                                                               "19-Jul", "24-Jul", "29-Jul", "03-Aug", "08-Aug", "13-Aug", "18-Aug"))) +
+             theme(axis.text.y.right = element_text(color = "transparent"),
+                   axis.ticks.y.right = element_line(color = "transparent"),
+                   axis.title.y.right = element_text(color = "transparent")),
+           
+           "TRUE" =   gom_coast %>% mutate(Year = year(t), yrday = yday(t)) %>% 
+             filter(yrday %in% c(60:121)) %>% 
+             group_by(Year) %>% summarise(Avg = mean(Avg, na.rm =TRUE), .groups = "drop") %>% 
+             left_join(gom_strt, by = "Year") %>% 
+             ggplot() + geom_line(aes(x = Year, y = Avg), size = 4) +
+             geom_line(aes(x = Year, y = (43 - pwrDstrt2/7)+23), col = "red", size = 4) +
+             scale_y_continuous(name = "Sea Surface Temperature (deg F)", 
+                                limits = c(37,43),
+                                sec.axis = sec_axis(~((43 - (.-23))*7), name = "Transition Day",
+                                                    breaks = c(seq(135,230,5)), 
+                                                    labels = c("15-May","20-May","25-May","30-May","04-Jun","09-Jun","14-Jun","19-Jun", "24-Jun", 
+                                                               "29-Jun", "04-Jul", "09-Jul", "14-Jul", 
+                                                               "19-Jul", "24-Jul", "29-Jul", "03-Aug", "08-Aug", "13-Aug", "18-Aug")))
+           
+    )
   })
 
   ############################### SPRING TRANSITION GOM ###########
@@ -844,7 +1090,7 @@ server <- function(input, output, session) {
                           pal = strt_day_pal, 
                           values = ~c(-1,0), opacity = 1.0, 
                           labels = strt_day_pal,
-                          title = "Landings-temperature correlation")}
+                          title = "Temp-Transition Date </br> correlation")}
   })
   
   
@@ -856,14 +1102,17 @@ server <- function(input, output, session) {
     
     output$strt_day_plot <- renderPlotly({
       zone_strt_temp_all %>% filter(id == input$zone_strt, yrday == yrdays) %>% 
-        dplyr::rename("SST" = zone_avg, "transition day" = zoneStrtDay, "year" = yr) %>%
-        ggplot() +  geom_point(aes(`transition day`, SST, col = year)) + 
-        geom_smooth(aes(`transition day`, SST), method = "lm", se = FALSE) +
-        scale_x_continuous(breaks = c(seq(135,230,5)), 
-                           labels = c("15-May","20-May","25-May","30-May","04-Jun","09-Jun","14-Jun","19-Jun", "24-Jun", 
-                                      "29-Jun", "04-Jul", "09-Jul", "14-Jul", 
-                                      "19-Jul", "24-Jul", "29-Jul", "03-Aug", "08-Aug", "13-Aug", "18-Aug"))+
-        labs(y = paste(mon, "Average Zone SST"), x = "Landings Start Day of Year", title = paste("Zone", input$zone_strt, sep = " "))  +
+        mutate(zone_avg = round(zone_avg, 2),
+               Yearday = round(zoneStrtDay),
+               "Transition Date" = format(as.Date(Yearday, origin = paste(yr, "12-31", sep = "-")), "%d-%b-%Y")) %>% 
+        dplyr::rename("SST" = zone_avg) %>%
+        ggplot() +  geom_point(aes(Yearday, SST, group = `Transition Date`)) + 
+        geom_smooth(aes(Yearday, SST), method = "lm", se = FALSE) +
+        scale_x_continuous(breaks = c(seq(135,230,10)), 
+                           labels = c("15-May","25-May","04-Jun","14-Jun", "24-Jun", 
+                                      "04-Jul", "14-Jul", 
+                                      "24-Jul", "03-Aug", "13-Aug"))+
+        labs(y = paste(mon, "Average Zone SST"), x = "Landings Transition Day", title = paste("Zone", input$zone_strt, sep = " "))  +
         theme(legend.position = "none",
               axis.title = element_text(size = 12),
               axis.text = element_text(size=10), 
@@ -875,46 +1124,233 @@ server <- function(input, output, session) {
     output$strt_day_plot2 <- renderPlot({
       
       zone_strt_temp %>% data.frame() %>%
-        ggplot() +  geom_smooth(aes(yrday, corr, color = id)) + 
+        ggplot() +  geom_smooth(aes(yrday, corr, color = id), se = FALSE, method = "gam") + 
         labs(x = "Day of Year", y = "Correlation", title = paste("Zone", input$zone_strt, sep = " ")) +
         scale_x_continuous(breaks = c(seq(1,140,20)), 
-                           labels = c("1-Jan","21-Jan","10-Feb","02-Mar", "22-Mar", 
-                                      "11-Apr", "19-May"), 
-                           limits = c(1,141)) + 
+                           labels = c("01-Jan","21-Jan","10-Feb","02-Mar", "22-Mar", 
+                                      "11-Apr", "01-May"), 
+                           limits = c(1,130)) + 
         scale_y_reverse(limits = c(0,-1)) +
-        gghighlight(id == input$zone_strt, label_key = id, keep_scales = TRUE, use_group_by = FALSE) + 
+        gghighlight(id == input$zone_strt, label_key = id, 
+                    keep_scales = TRUE, use_group_by = FALSE, unhighlighted_colour = "gray93") + 
         geom_vline(xintercept = yrdays) + scale_color_manual(values = c("#25356f",
                                                                         "#cb9d00",
                                                                         "#961e1d",
                                                                         "#b3875a",
                                                                         "#ffd380",
                                                                         "#76a1a0",
-                                                                        "#97c8f0"))
+                                                                        "#97c8f0"), name = "") +
+        theme(legend.position = c(.2,.9))
     })
   })
   
-  ################################## image outputs #########
-  output$multiyear <- renderImage({
-
-      return(list(
-        src = "Images/multiyear.png",
-        contentType = "image/png",
-        alt = "multi-year"
-      ))
-     
-    
-  }, deleteFile = FALSE)
   
-  output$multidecade <- renderImage({
+  ################################ START DAY YDAY plot #################3
+  
+  output$Strt_day_forecast <- renderPlot({
+    plot1 <- 
+      mon_landings %>%
+      mutate(t = as.Date(paste(Year,Month,"01", sep="-")), 
+             molen = days_in_month(t),
+             Date = as.Date(paste(Year, Month, molen, sep="-")),
+             yrday = yday(Date),
+             Pounds = Pounds/1000000) %>%
+      left_join(., gom_strt, by = c("Year")) %>%
+      full_join(., forecasts, by = c("Year")) %>% 
+      filter(Year == input$Year, Forecast_Date == as.Date(paste(input$Year, input$forecast_date, sep = "-"))) %>% 
+      ggplot() + geom_point(aes(yrday, Pounds), size = 5) +
+      scale_x_continuous(breaks = c(seq(75,250,25)), 
+                         labels = c("16-Mar", "10-Apr","5-May", "30-May", "24-Jun",
+                                    "19-Jul", "13-Aug",
+                                    "7-Sep"), 
+                         limits = c(50,250)) +
+      scale_y_continuous(limits = c(-5,32), breaks = seq(0,30,5)) +
+      labs(y = "Landings (millions of pounds)", x = "Day of year") +
+      theme(legend.text = element_text(size = 14),
+            legend.title = element_text(size = 14))
+
+    if(input$forecast){
+      plot1 <- plot1 + geom_tile(aes(x = as.numeric(strtbin), y = -2, fill = Percent), height = 6) +
+        scale_fill_gradient(limits = c(0,100), low = "white", high = "black") +
+        scale_alpha(range = c(0,1), guide = "none") 
+    }
+      
+    if(input$actual){
+      plot1 <-  plot1 + geom_vline(aes(xintercept = pwrDstrt2), col = "red", size = 3)
+    }
     
-    return(list(
-      src = "Images/multidecade.png",
-      contentType = "image/png",
-      alt = "multi-decade"
-    ))
+    print(plot1)
+    
+  })
+  
+  
+  ################################ POP_LANDINGS PLOT #################
+  
+  output$multidecade <- renderPlot({
+    switch(input$pop_landings,
+           
+           "land" = lob_pop_proj %>% 
+             filter(Model == "CMIP5_RCP 8.5_mean") %>% 
+             ggplot() + 
+             geom_point(aes(Year, Landings), size = 3) + 
+             geom_line(aes(Year, Landings_pred), color = "blue", size = 2) +
+             geom_ribbon(aes(x = Year, ymax = upr, ymin = lwr), fill = "blue", alpha = .1) + 
+             theme(legend.position = c(.85,.85)) +
+             labs(y = "Landings (millions of pounds)") +
+             scale_x_continuous(limits = c(1982,2050)),
+           
+           "pop" = lob_pop_proj %>% filter(Model == "CMIP5_RCP 8.5_mean") %>% ggplot() + 
+             geom_line(aes(Year, Average), size = 2, color = "red") +
+             geom_point(aes(Year, Abundance), size = 3) +
+             geom_ribbon(aes(x = Year, ymax = Average + Std*2, ymin = Average - Std*2), fill = "red", alpha = .1) + 
+             theme(legend.position = c(.85,.85)) +
+             labs(y = "Population (millions of individuals)") +
+             scale_x_continuous(limits = c(1982,2050))
+           )
+  })
+  
+  #################################### temp_landings_trends #############
+  
+  output$temp_landings_trends <- renderPlot({
+    
+    on_off <- paste(input$cmip_proj)
+    
+    switch (on_off,
+      "FALSE" = gom_oisst_df %>%
+        left_join(., yr_lob_landings, by = "Year") %>% 
+        filter(Year >1981, Year < 2020) %>% 
+        ggplot() + geom_line(aes(x = Year, y = Avg), size = 3, col = "darkblue") +
+        geom_point(aes(x = Year, y = `pounds(millions)`/20+57.5), size = 3, color = "gray15") +
+        scale_y_continuous(sec.axis = sec_axis(~(.-57.5)*20, breaks = c(25,50,75,100, 125), 
+                                               labels = c(25,50,75,100, 125), name = "Landings (millions of pounds)")) +
+        labs(y = "Sea Surface Temperature (deg F)") +
+        theme(axis.title.y.left = element_text(color = "darkblue"),
+              axis.ticks.y.left = element_line(color = "darkblue"),
+              axis.text.y.left = element_text(color = "darkblue"),
+              axis.line.y.left = element_line(color = "darkblue")),
+      
+      "TRUE" = gom_oisst_df %>% 
+        left_join(., yr_lob_landings, by = "Year") %>% 
+        right_join(cmipsst, by = "Year") %>% filter(Year < 2051) %>%  ggplot() + geom_line(aes(Year, Mean), size = 3, col = "deepskyblue") +
+        geom_ribbon(aes(x = Year, ymin = low, ymax = high), fill = "deepskyblue", alpha = .15) +
+        labs(y = "Sea Surface Temperature (deg F)") + geom_line(aes(x = Year, y = Avg), size = 3, col = "darkblue") +
+        geom_point(aes(x = Year, y = `pounds(millions)`/20+57.5), size = 3, color = "gray15") +
+        scale_y_continuous(sec.axis = sec_axis(~(.-57.5)*20, breaks = c(25,50,75,100, 125), 
+                                               labels = c(25,50,75,100, 125), name = "Landings (millions of pounds)")) +
+        labs(y = "Sea Surface Temperature (deg F)") +
+        theme(axis.title.y.left = element_text(color = "darkblue"),
+              axis.ticks.y.left = element_line(color = "darkblue"),
+              axis.text.y.left = element_text(color = "darkblue"),
+              axis.line.y.left = element_line(color = "darkblue"))
+    )
+  })
+  
+  
+  ################################## 2019 multi year forecast #########
+  output$multiyear <- renderPlot({
+    plot_forecast <- multi_year %>% left_join(yr_zone_landings, by = c("Year", "Zone")) %>% 
+      filter(`forecast year` == 2019, Zone == input$study_area) %>% 
+      ggplot() + 
+      geom_ribbon(aes(x = Year, ymin = `10th`, ymax = `90th`, fill = run), alpha = .5) +
+      geom_ribbon(aes(x = Year, ymin = `25th`, ymax = `75th`, fill = run)) +
+      geom_line(aes(Year, Median), color = "red", size = 2) + 
+      geom_point(aes(Year, Landings), size = 4) + 
+      geom_line(aes(Year, Landings), size = 2) + 
+      theme(legend.position = c(.9,.9)) +
+      labs(x = "Year", y = "Millions of Pounds") + 
+      scale_fill_manual(values = c("hindcast" = "deepskyblue", "forecast" = "darkorange"), name = "",
+                        guide = guide_legend(reverse = TRUE))
+    
+    plot_inset <- ggplot() +
+      geom_sf(data = Lob_zone_sf_simple, aes(fill = ZONEID, geometry = geometry)) +
+      theme(axis.line = element_blank(), 
+            axis.text = element_blank(),
+            axis.ticks = element_blank()) +
+      gghighlight(ZONEID == input$study_area, label_key = ZONEID, unhighlighted_colour = "gray93", 
+                  keep_scales = TRUE) +
+      scale_fill_manual(values = c("#25356f",
+                                   "#cb9d00",
+                                   "#961e1d",
+                                   "#b3875a",
+                                   "#ffd380",
+                                   "#76a1a0",
+                                   "#97c8f0"), guide = "none")
     
     
-  }, deleteFile = FALSE)
+    
+    plot_together <- plot_forecast
+    print(plot_inset, vp = grid::viewport(x = 0.31, y = 0.8, width = 0.3, height = 0.3))
+    
+    return(plot_together)
+
+  })
+  
+  ######################### ALSI_skill
+  
+  output$ALSI_skill <- renderPlot({
+    
+    on_off <- paste(input$ALSI_skill_select)
+    
+    switch(on_off,
+           
+           "FALSE" = multi_year %>% left_join(yr_zone_landings, by = c("Year", "Zone")) %>% 
+             filter(`forecast year` == 2013, Year %in% c(1999:2013), Zone == "B") %>% 
+             ggplot() + 
+             geom_ribbon(aes(x = Year, ymin = `10th`, ymax = `90th`, fill = run), alpha = .5) +
+             geom_ribbon(aes(x = Year, ymin = `25th`, ymax = `75th`, fill = run)) +
+             geom_line(aes(Year, Median), color = "red", size = 2) + 
+             geom_point(aes(Year, Landings), size = 4) + 
+             geom_line(aes(Year, Landings), size = 2) +
+             scale_x_continuous(limits = c(2000, 2019)) + 
+             annotate("text", x = 2004, y = 13, label = "Observed Landings", size = 10) + 
+             annotate("text", x =2009, y = 20, label = "Hindcast", color = "deepskyblue", size = 10) +
+             scale_fill_manual(values = c("hindcast" = "deepskyblue", "forecast" = "darkorange")) +
+             theme(legend.position = "none") +
+             labs(x = "Year", y = "Landings (millions of pounds)") + 
+             scale_y_continuous(limits = c(0,25)),
+           
+           "TRUE" = multi_year %>% left_join(yr_zone_landings, by = c("Year", "Zone")) %>% 
+             filter(`forecast year` == 2013, Zone == "B") %>% 
+             ggplot() + 
+             geom_ribbon(aes(x = Year, ymin = `10th`, ymax = `90th`, fill = run), alpha = .5) +
+             geom_ribbon(aes(x = Year, ymin = `25th`, ymax = `75th`, fill = run)) +
+             geom_line(aes(Year, Median), color = "red", size = 2) + 
+             geom_point(aes(Year, Landings), size = 4) + 
+             geom_line(aes(Year, Landings), size = 2) +
+             scale_x_continuous(limits = c(2000, 2019)) + 
+             annotate("text", x = 2015, y = 12, label = "Skill \n Assessment", size = 10) + 
+             annotate("text", x =2018, y = 24, label = "Forecast", color = "darkorange", size = 10) +
+             scale_fill_manual(values = c("hindcast" = "deepskyblue", "forecast" = "darkorange")) +
+             theme(legend.position = "none") +
+             labs(x = "Year", y = "Landings (millions of pounds)") + 
+             scale_y_continuous(limits = c(0,25))
+           
+           )
+  })
+  
+  ############################## Forecast Year skill assessment
+  
+  output$multi_year_assessment <- renderPlot({
+    multi_year %>% left_join(yr_zone_landings, by = c("Year", "Zone")) %>% 
+      filter(`forecast year` == input$alsi_forecast_date, Zone != "G") %>% 
+      ggplot() + 
+      geom_ribbon(aes(x = Year, ymin = `10th`, ymax = `90th`, fill = run), alpha = .5) +
+      geom_ribbon(aes(x = Year, ymin = `25th`, ymax = `75th`, fill = run)) +
+      geom_line(aes(Year, Median), color = "red", size = 2) + 
+      geom_point(aes(Year, Landings, alpha = run), size = 4) + 
+      geom_line(aes(Year, Landings, alpha = run), size = 2) + 
+      theme(legend.position = c(.08,.95),
+            strip.background = element_blank(),
+            strip.text = element_text(size = 14)) +
+      labs(x = "Year", y = "Landings (millions of pounds)") + 
+      scale_fill_manual(values = c("hindcast" = "deepskyblue", "forecast" = "darkorange"), name = "", guide = guide_legend(reverse = TRUE)) +
+      scale_alpha_discrete(range = c(.5,1), guide = "none") +
+      facet_wrap(~Zone, scales = "free_y", labeller = labeller(Zone = c("A" = "Zone A", "B" = "Zone B","C" = "Zone C","D"= "Zone D",
+                                                                        "E" = "Zone E", "F" = "Zone F"))) +
+      scale_x_continuous(limits = c(2000,2025))
+  })
+
+  
 }
 
 
