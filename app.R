@@ -30,16 +30,39 @@ cmipsst <- read_csv("Data/CMIPSSTProjections.csv") %>%
                    high = mean(high),
                    .groups = "drop")
 
+cmipsst_sne <- read_csv("Data/CMIPSSTProjections_sne.csv")%>% 
+  mutate(Mean = Mean*(9/5)+32,
+         low = low*(9/5)+32,
+         high = high*(9/5)+32) %>% mutate(Year = year(Date), mon = month(Date)) %>% 
+  filter(mon %in% c(7,8,9)) %>% group_by(Year) %>% 
+  dplyr::summarise(Mean = mean(Mean), 
+                   low = mean(low),
+                   high = mean(high),
+                   .groups = "drop")
+
 # Multi decadal lobster population projection
-lob_pop_proj <- read_csv("Data/Landings_predictions.csv")
 
-lob_abun <- read_csv("Data/ASMFC.csv")
+gom_landings <- read_csv("Data/GoM_lob_landings.csv")
+gom_landings_yr <- gom_landings  %>% group_by(Year) %>% 
+  summarise(Landings = sum(Pounds, na.rm=TRUE)) %>% 
+  mutate(Landings = Landings/1000000)
 
-lob_pop_proj <- left_join(lob_pop_proj, lob_abun, by = "Year")
+sne_landings <- read_csv("Data/sne_landings.csv")
+sne_landings_yr <- sne_landings  %>% group_by(Year) %>% 
+  summarise(Landings = sum(Pounds, na.rm=TRUE)) %>% 
+  mutate(Landings = Landings/1000000)
+
+gom_lob_data <- read_csv("Data/gom_lob_data.csv")
+
+sne_lob_data <- read_csv("Data/sne_lob_data.csv")
 
 gom_oisst_df <- read_csv("Data/gom_oisst.csv") %>% mutate(Year = year(Date), mon = month(Date)) %>% 
   filter(Year > 1981, Year < 2020, mon %in% c(7,8,9)) %>% group_by(Year) %>% 
   dplyr::summarise(Avg = mean(gom_oisst)*(9/5)+32, .groups = "drop")
+
+sne_oisst_df <- read_csv("Data/sne_oisst.csv") %>% mutate(Year = year(Date), mon = month(Date)) %>% 
+  filter(Year > 1981, Year < 2020, mon %in% c(7,8,9)) %>% group_by(Year) %>% 
+  dplyr::summarise(Avg = mean(sne_oisst)*(9/5)+32, .groups = "drop")
 
 # Average bottom temperature for lobster zone (FVCOM)
 FVCOM_Zone_avgs <- read_csv(here::here("Data/FVCOM_Zone_avgs.csv")) %>% mutate(zone_avg = zone_avg*(9/5)+32)
@@ -73,13 +96,17 @@ forecasts <- read_csv("Data/Forecasts_for_app.csv")%>%
 #  group_by(name, Type, Depth, yr) %>% dplyr::summarise(Values = mean(Values, na.rm=TRUE), .groups = "drop")
   
 # lobster zone shp file
-Lob_zone_sf_simple <- st_read(here::here("Data/Lob_zone_sf.shp")) %>% st_transform(crs = '+proj=longlat +datum=WGS84') 
+Lob_zone_sf_simple <- st_read("Data/Lob_zone_sf.shp") %>% st_transform(crs = '+proj=longlat +datum=WGS84') 
 
 zone_strt_temp_all <-  All_Zone_avgs %>% mutate(yr = year(t), yrday = yday(t)) %>% 
   left_join(., zone_strt, by = c("yr" = "year", "zone" = "zone")) %>%
   na.omit() %>% 
   rename("id" = zone)
 
+# other shapefiles
+gom_shp <- st_read("Data/GoM_combined_sp.shp") %>% st_transform(crs = '+proj=longlat +datum=WGS84') 
+sne_shp <- st_read("Data/Southern_New_England_Management_Area.shp") %>% st_transform(crs = '+proj=longlat +datum=WGS84') 
+multi_year_shp <- st_read("Data/Lob_zone_sf.shp") %>% st_transform(crs = '+proj=longlat +datum=WGS84') 
 # monthly lobster landings by zone
 lob_zone_landing <- read_csv("Data/lob_zone.csv")
 
@@ -144,6 +171,14 @@ factpal <- colorFactor(c("#25356f",
                          "#76a1a0",
                          "#97c8f0"), Lob_zone_sf_simple$ZONEID)
 
+factpal2 <- colorFactor(c("#25356f",
+                         "#cb9d00",
+                         "#961e1d",
+                         "#b3875a",
+                         "#ffd380",
+                         "#76a1a0",
+                         "#97c8f0"), multi_year_shp$ZONEID)
+
 move_pal <- colorNumeric(
   palette = "viridis",
   domain = c(min(lob_movement$Year),max(lob_movement$Year))
@@ -158,7 +193,7 @@ ui <- fluidPage(
                               border-style:none;
                             border-width:1px;
                             border-radius:20%;
-                            font-size:18px;}
+                            font-size:20px;}
                             .selectize-dropdown{color:#003A54}
                             .container-fluid{
                             width: 100%;
@@ -192,11 +227,16 @@ ui <- fluidPage(
     column(width = 12,
            tags$h2("Overview"),
            tags$p("The fishery for American lobster (Homarus americanus) is one of the most valuable in the United States, 
-                     and the fishery is especially important in the state of Maine.  
+                     and it is especially important in the state of Maine.  
                      Ninety percent of the volume of U.S. lobster landings are from the Gulf of Maine and 
                      80% from Maine alone. In Maine, the lobster fishery accounts for 78% of all fishery landings in the state.  
                      The high dependence of Maine’s coastal economy on this single fishery means that 
-                     changes in the volume of lobster landings have a large impact in the state's coastal communities."),
+                     changes in the volume of lobster landings have a large impact in the state's coastal communities. 
+                  Maine's lobster fishery is co-managed by the state's Department of Marine Resources and councils composed
+           of lobster license holders that represent each of seven Lobster Management Zones (Figure 1). 
+           Each zone has a set of regulations that controls the commercial harvest of lobsters.",
+                  tags$a(href="https://www.maine.gov/dmr/about/councils/lobzones/index.html", "Lobster Zone Councils"), 
+                  " help tailor state-wide regulations to the conditions within each distinct zone."),
            tags$p("Ocean temperatures have been trending upwards in the Gulf of Maine, and rising temperatures
                      affect lobster landings in multiple ways and at multiple time scales, including:"), 
            tags$ul(
@@ -207,15 +247,12 @@ ui <- fluidPage(
                            influences the number of lobsters that will mature into harvestable sizes in any given year."),
              tags$li("Multi-decadal: Temperature also influences the recruitment of lobsters. 
                      Over multiple generations directional changes in recruitment affect the size of the lobster population and the associated sustainable catch levels.")),
-           tags$p("Maine's lobster fishery is co-managed by the state's Department of Marine Resources and councils composed
-           of lobster license holders that represent each of seven Lobster Management Zones (Figure 1). 
-           Each zone has a set of regulations that controls the commercial harvest of lobsters.",
-                  tags$a(href="https://www.maine.gov/dmr/about/councils/lobzones/index.html", "Lobster Zone Councils"), 
-                  " help tailor state-wide regulations to the conditions within each distinct zone."))),
+           tags$p("In this dashboard, we provide opportunities to investigate past temperature and landings data 
+                  as well as explore how temperature may affect Maine's lobster fishery at these three time scales in the future."))),
   fluidRow(
     column(
       width = 12,
-      align="center",
+      offset = 3,
       leafletOutput(outputId = "Lob_zone_map", height = "600px", width = "600px")
     )
   ),
@@ -223,7 +260,9 @@ ui <- fluidPage(
     column(
       width = 6,
       offset = 3,
-      tags$h6("Figure 1: Maine Lobster Management Zones. There are seven zones lettered alphbetically from Zone A in the east to zone G in the west.")
+      tags$h6("Figure 1: Domains of the three studies. Seasonal: Maine Lobster Management Zones. 
+              Multi-year: Southern New England to New Brunswick, Canada.
+              Multi-decadal: Southern New England and the Gulf of Maine")
     )
   ),
   
@@ -232,14 +271,16 @@ ui <- fluidPage(
   fluidRow(
     column(
       width = 12,
-      tags$h4("Explore historical data or temperature-to-lobster relationships")
+      tags$h2("Explore past and future data")
     )
   ),
   
   fluidRow(
     column(
       width = 12,
-      selectInput(inputId = "time_period", choices = c("Choose One" = "", "Historical" = "hist", "Future" = "proj"), label = "Select a time period")
+      selectInput(inputId = "time_period", 
+                  choices = c("Choose One" = "", "Past" = "hist", "Future" = "proj"), 
+                  label = tags$h4("Select a time period"))
     )
   ),
   
@@ -290,8 +331,9 @@ server <- function(input, output, session) {
       "hist" = fluidRow(
         column(
           width = 12,
-          tags$h4("Are you interested in temperature or landings?"),
-          selectInput(inputId = "indicators", label = "Variable", choices = c("Choose One" = "", "Temperature" = "temp", "Landings" = "land"),
+          tags$h2("Are you interested in temperature or landings?"),
+          selectInput(inputId = "indicators", label = tags$h4("Select Variable"), 
+                      choices = c("Choose One" = "", "Temperature" = "temp", "Landings" = "land"),
                       selected = NULL)
         )
       ),
@@ -299,8 +341,9 @@ server <- function(input, output, session) {
       "proj" = fluidRow(
         column(
           width = 12,
-          tags$h4("Which relationship do you want to explore?"),
-          selectInput(inputId = "forecasts", label = "Relationship", choices = c("Choose One" = "", "Seasonal" = "season", "Multi-year" = "annual", "Multi-decadal" = "multi_decadal"),
+          tags$h2("Which relationship do you want to explore?"),
+          selectInput(inputId = "forecasts", label = tags$h4("Select Relationship"), 
+                      choices = c("Choose One" = "", "Seasonal" = "season", "Multi-year" = "annual", "Multi-decadal" = "multi_decadal"),
                       selected = NULL)
         )
       )
@@ -404,26 +447,27 @@ server <- function(input, output, session) {
                column(
                  width = 12,
                  tags$p("Lobster 'landings' represent lobsters that are caught, brought to shore, and sold by the harvester. 
-                 Lobster landings in the state of Maine have risen steadily since the mid-1980s (Figure L1, left panel). 
+                 Lobster landings in the state of Maine have risen steadily since the mid-1980s (Figure L1). 
                         A large portion of this increase is attributed to 
-                        the warming Gulf of Maine, which has caused a northward shift and 
+                        the warming Gulf of Maine, which has 
                         enhanced productivity of the lobster population and contributed to a northward shift in the 
-                        location of lobster in Northeast U.S. waters (Figure L1, right panel)."))),
+                        location of lobster in Northeast U.S. waters."))),
              fluidRow(
                column(
                  width = 6,
+                 offset = 3,
                  plotOutput(outputId = "long_term_langings")
                ),
                column(
-                 width = 6,
-                 leafletOutput(outputId = "biomass")
+                 width = 6
+               #  leafletOutput(outputId = "biomass")
                )
              ),
              fluidRow(
                column(
                  width = 12,
-                 tags$h6("Figure L1: (Left) Yearly total lobster landings in Maine. 
-                         (Right) Center of American lobster biomass, color indicates year.")
+                 align="center",
+                 tags$h6("Figure L1: Yearly total lobster landings in Maine.")
                )
              ),
              fluidRow(
@@ -457,8 +501,8 @@ server <- function(input, output, session) {
                  a seasonal cycle and multi-year trend in landings. Use the radio buttons to select
                  the view as monthly or yearly averages for the full time series (on the top) or flip through the different lobster zones 
                  to see how the seasonal cycles compare between years (on the bottom). 
-                 The legend of the graph is interactive and each of the lobster zones and years are selectable by clicking on the
-                        zone in the legend to remove the zone or doubling clicking to isolate the zone. 
+                 The legend of the graph is interactive, and each of the lobster zones and years are selectable by clicking on the
+                        zone in the legend to remove the zone or double clicking to isolate the zone. 
                         Landings data are from Maine Department of Maine Resources."))),
              fluidRow(
                column(
@@ -505,11 +549,12 @@ server <- function(input, output, session) {
                     lobsters become more readily harvested by the coastal fishery."), 
                  plotOutput(outputId = "transition_gom"),
                  tags$h6("Figure S1: Seasonality and yearly differences in lobster landings in Maine. 
-                 The vertical lines indicate the timing of the transition date for 2014 (red) and 
-                 2016 (blue). 
+                 The vertical lines indicate the timing of the transition date for 2014 (gray) and 
+                 2016 (black). 
                  This date is determined as a point when the landings have clearly started to increase for the season (for more details, see Mills et al. 2017).
                  The year 2016 had an earlier transition to the high summer
                          landings period than 2014 (indicated by the arrow)."),
+                 tags$br(),
                  tags$p("This transition to the high-landings summer period typically happens in late June 
                     or early July, but it can occur in late May through late July.  Water temperature 
                     plays a role in determining when this transition happens, and there is a lagged 
@@ -539,14 +584,14 @@ server <- function(input, output, session) {
         fluidRow(
           column(
             width = 12,
-            tags$h3("How do past statewide forecasts compare to the actual transition period?"),
-            tags$p("Use the widget below to see how the actual lobster landings transition date in the state of Maine align with the 
+            tags$h3("How do past forecasts of transition date compare to the actual transition period?"),
+            tags$p("Use the widget below to see how the actual lobster landings transition date in the state of Maine aligns with the 
                    forecasted transition period, based on the temperature-transition day relationship shown above. 
                    The vertical red line is the observed transition date and the black dots are the monthly landings.
-                   The forecast is run many times over different sets of data to create a range of possible transition dates. 
+                   The forecast is run many times to create a range of possible transition dates. 
                    The color bar shows the percent of forecast runs that align on the same week. 
                    The darker the color, the higher chance the transition day will occur during that week. The tool allows you
-                   to change the year and the date of the forecast. The forecast might change depending on the forecast date. 
+                   to change the year and the date of the forecast. The forecast results might change depending on the forecast date. 
                    If the current year is shown, only the forecast is shown. 
                    Current year landings and actual transition date become available the following year.")
           )
@@ -602,8 +647,8 @@ server <- function(input, output, session) {
                                         and lobster landings."),
                            tags$p("The bottom graph shows the correlation between the average sea surface 
                                         temperature and the transition date for January to June. In this graph, the 
-                                        peak of the curve indicates the best spring date for predicting the landings transition date."),
-                           tags$p("For most lobster zones, the correlation peaks between March 15th and March 25th."))))),
+                                        peak of the curve indicates the best spring date for predicting the landings transition date. 
+                                  For most lobster zones, the correlation peaks between March 15th and March 25th."))))),
                  fluidRow(
                    column(
                      width = 4,
@@ -717,7 +762,7 @@ server <- function(input, output, session) {
             plotOutput("ALSI_skill"),
             tags$h6("Assessing model skill by comparing model predictions of landings to actual observations."),
             tags$br(),
-            tags$h4("How do the forecasts change through time?"),
+            tags$h3("How do the forecasts change through time?"),
             tags$p("These forecasts take in new data each year and adjust the predictions accordingly. 
                    Using the interactive graphs below, you can change the forecast date to see how well the models performed in forecasting future landings.")
           )
@@ -739,9 +784,10 @@ server <- function(input, output, session) {
         fluidRow(
           column(
             width = 12,
-            tags$h6("Observed (black line and dots) and predicted (red line) lobster landings. Hindcasts (blue), 
-                   and forecasts (orange) with 25–75% (dark shaded) and 10–90% (light shaded) quantiles are made starting from the selected date. 
-                   Faded dots not included in the forecast as they were collected after the forecast was made. 
+            tags$h6("Observed (black line and dots) and predicted (red line) lobster landings. Hindcasts (blue) 
+                   and forecasts (orange) with 25–75% (dark shaded) and 10–90% (light shaded) 
+                   quantiles are made starting from the selected date. 
+                   Faded dots are not included in the forecast, as they were collected after the forecast was made. 
                     These observations can be used to assess the model's skill.")
           )
         )
@@ -757,49 +803,68 @@ server <- function(input, output, session) {
           column(
             width = 12,
             tags$p("Rising ocean temperatures can affect multiple biological processes in lobster, 
-            but they exert particularly strong effect on lobster survival through the first year of life.  
-              Survival of during the first year is enhanced by optimal summer temperatures of approximately 60 degrees F.  
+            but they exert a particularly strong effect on lobster survival through the first year of life.  
+              Survival during the first year is enhanced by optimal summer temperatures of approximately 61 degrees F.  
               Recent temperatures in the Gulf of Maine near this optimum have boosted Gulf of Maine lobster abundance, 
               but as temperatures have exceeded this optimum in Southern New England, the lobster population has declined.  
-              Future temperatures in Gulf of Maine are projected to exceed this preferred temperature and are expected to 
-                   influence population trajectories for the lobster population."))),
+              Future temperatures in the Gulf of Maine are projected to exceed this preferred temperature and are expected to 
+                   influence the trajectory of the lobster population."))),
+        fluidRow(
+          column(
+            width = 4,
+            checkboxInput("cmip_proj", "Summer Temperature Projections")),
+          column(width = 6,
+                 radioButtons("sne_select", label = "Location", choices = c("Gulf of Maine" = "gom", 
+                                                       "Southern New England" = "sne"),
+                             inline = TRUE))),
         fluidRow(
           column(
             width = 12,
-            checkboxInput("cmip_proj", "Summertime Temperature Projections to 2050"),
             plotOutput("temp_landings_trends")
           )
         ),
         fluidRow(
           column(
             width = 12,
-            tags$h6("Trends in summertime sea surface temperature (dark blue line) in the Gulf of Maine from 
-            1982 to 2020 and lobster landings (black dots) in the state of Maine. 
-                    The 'Temperature Projections to 2050' button reveals the 
-                    projected sea surface temperature to 2050 (light blue, shaded region is 95% confidence interval).")
+            tags$h6("Trends in Summertime sea surface temperature (dark blue line) in the Gulf of Maine 
+            and southern New England from 
+            1982 to 2020 and lobster landings (red dots) in Maine and southern New England states. 
+                    The 'Summer Temperature Projection' button reveals the 
+                    projected summertime sea surface temperature to 2050 (light blue, shaded region is 95% confidence interval) 
+                    from teh CMIP-5 climate model ensemble run under RCP 8.5.")
           )
         ),
+        tags$br(),
         fluidRow(
           column(
             width = 12,
             tags$p("Temperature can be used to predict the size of the lobster population. 
-            Using temperature projections through 2050, we can estimate the lobster population to that time. 
-            We can use the relationship between population and observed landings to then convert projected population to landings.
-            The interactive graph below can be used to explore projected estimates of the Gulf of Maine lobster 
-                   population and landings under the 'business as usual' climate change scenario (RCP 8.5)"))),
+            Using temperature projections, we can estimate the lobster population through 2050. 
+            We can then use the relationship between population and observed landings to convert the projected population abundance to landings.
+            The interactive graph below can be used to explore projected estimates of the Gulf of Maine 
+            and southern New England lobster 
+                   landings and population under the 'business as usual' climate change scenario (RCP 8.5)"))),
+        fluidRow(
+          column(
+            width = 4,
+            radioButtons("pop_landings", "Modeled data", choices = c("Population" = "pop", "Landings" = "land"),
+                         inline = TRUE)),
+            column(width = 6,
+                   radioButtons("gom_select", label = "Location", choices = c("Gulf of Maine" = "gom", 
+                                                                        "Southern New England" = "sne"),
+                                inline = TRUE))
+        ),
         fluidRow(
           column(
             width = 12,
-            radioButtons("pop_landings", "Modeled data", choices = c("Population" = "pop",
-                                                                     "Landings" = "land")),
             plotOutput("multidecade")
           )
         ),
         fluidRow(
           column(
             width = 12,
-            tags$h6("Projections of American lobster abundance. Estimated abundance from 1985 to 2050 for the GoM. 
-                    The shaded region shows the 95% confidence intervals.")
+            tags$h6("Projections of American lobster population and landings from 1985 to 2050 for the Gulf of Maine and southern New England. 
+                    The red dots are observed population and landings. The shaded region shows the 95% confidence intervals.")
           )
         )) 
     )}
@@ -816,14 +881,39 @@ server <- function(input, output, session) {
   ############################## LOBSTER ZONE MAP #############
   
   output$Lob_zone_map <- renderLeaflet({        
-    leaflet() %>% addProviderTiles(providers$Esri.NatGeoWorldMap) %>% fitBounds(-70.5, 42.5, -66, 45) %>%
-      addPolygons(data = Lob_zone_sf_simple, fillColor = ~factpal(ZONEID), color = "transparent", fillOpacity = 1, layerId = ~ZONEID,
+    leaflet() %>% addProviderTiles(providers$Esri.NatGeoWorldMap) %>% 
+      fitBounds(-72.5, 41.5, -66, 45) %>%
+      addPolygons(data = sne_shp, 
+                  highlightOptions = highlightOptions(color = "white", weight = 2, bringToFront = FALSE),
+                  label = "Southern New England",
+                  color = "transparent",
+                  fillColor = "red",
+                  group = "Multi-decadal") %>%
+      addPolygons(data = gom_shp, 
+                  highlightOptions = highlightOptions(color = "white", weight = 2, bringToFront = FALSE),
+                  label = "Gulf of Maine",
+                  color = "transparent",
+                  fillColor = "blue",
+                  group = "Multi-decadal") %>% 
+      addPolygons(data = Lob_zone_sf_simple, fillColor = ~factpal(ZONEID), 
+                  color = "transparent", fillOpacity = 1, layerId = ~ZONEID,
                   highlightOptions = highlightOptions(color = "white", 
                                                       weight = 2, bringToFront = TRUE),
-                  label = ~paste("Zone", ZONEID, sep = " ")) %>% 
+                  label = ~paste("Zone", ZONEID, sep = " "),
+                  group = "Seasonal") %>% 
       addLegend(colors = c("#25356f","#cb9d00","#961e1d","#b3875a","#ffd380","#76a1a0","#97c8f0"), 
                 labels = c("A","B","C", "D", "E", "F", "G"),
-                title = "Lobster Zone") %>%
+                title = "Management zones",
+                position = "topleft",
+                group = "Seasonal") %>% 
+      addLegend(colors = c("blue","red"), 
+                labels = c("Gulf of Maine","Southern New England"),
+                title = "Study regions",
+                position = "topleft",
+                group = "Multi-decadal") %>% 
+      addLayersControl(
+        baseGroups = c("Seasonal and Multi-year", "Multi-decadal"),
+        options = layersControlOptions(collapsed = FALSE)) %>% 
       leaflet.extras::suspendScroll()})
   
   ############################## LONG_TERM LANDINGS ##############
@@ -836,14 +926,14 @@ server <- function(input, output, session) {
   
   ############################### CENTER OF BIOMASS ##############
   
-  output$biomass <- renderLeaflet({
-    leaflet() %>% addTiles() %>% 
-      addCircleMarkers(data=lob_movement, lng = ~Longitude, lat = ~Latitude, color = ~move_pal(Year), label = ~Year) %>%
-      addLegend(position = "topright",
-                pal = move_pal, 
-                values = c(min(lob_movement$Year), max(lob_movement$Year)),
-                labFormat = labelFormat(big.mark = ""))
-  })
+  #output$biomass <- renderLeaflet({
+  # leaflet() %>% addTiles() %>% 
+  #    addCircleMarkers(data=lob_movement, lng = ~Longitude, lat = ~Latitude, color = ~move_pal(Year), label = ~Year) %>%
+  #    addLegend(position = "topright",
+  #              pal = move_pal, 
+  #              values = c(min(lob_movement$Year), max(lob_movement$Year)),
+  #              labFormat = labelFormat(big.mark = ""))
+  #})
   
   ############################### SPRING TRANSITION ###########
   
@@ -861,7 +951,8 @@ server <- function(input, output, session) {
       scale_x_continuous(breaks = c(31, 60,91,121,152,182,213,244,274,305,335,366), 
                          labels = c("Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec")) +
       geom_segment(aes(x = 217, y = 15, xend = 196, yend = 15, colour = "segment"),
-                   arrow = arrow(), color = "black")
+                   arrow = arrow(), color = "red", size = 2) +
+      scale_color_manual(values=c("#88A2AA","#0F1A20"))
   })
   
 
@@ -877,7 +968,8 @@ server <- function(input, output, session) {
       geom_hline(aes(yintercept = yint, col = Depth)) +
       scale_x_continuous(breaks = seq(1985,2020,5)) +
       labs(x = "Year", y = "Temperature (deg F)") +
-      scale_color_discrete(labels = c("Bottom", "Surface")) +
+      scale_color_manual(labels = c("Bottom", "Surface"),
+                           values = c("#1A237E","#42B3D5")) +
       guides(color = guide_legend(reverse = TRUE))
   })
   
@@ -994,7 +1086,7 @@ server <- function(input, output, session) {
              filter(yrday %in% c(60:121)) %>% 
              group_by(Year) %>% summarise(Avg = mean(Avg, na.rm =TRUE), .groups = "drop") %>% 
              left_join(gom_strt, by = "Year") %>% 
-             ggplot() + geom_line(aes(x = Year, y = Avg), size = 4) +
+             ggplot() + geom_line(aes(x = Year, y = Avg), size = 4, color = "darkblue") +
              labs(y = "Sea Surface Temperature (deg F)") +
              scale_y_continuous(limits = c(37,43), 
                                 sec.axis = sec_axis(~((43 - (.-23))*7), name = "Transition Day",
@@ -1004,21 +1096,33 @@ server <- function(input, output, session) {
                                                                "19-Jul", "24-Jul", "29-Jul", "03-Aug", "08-Aug", "13-Aug", "18-Aug"))) +
              theme(axis.text.y.right = element_text(color = "transparent"),
                    axis.ticks.y.right = element_line(color = "transparent"),
-                   axis.title.y.right = element_text(color = "transparent")),
+                   axis.title.y.right = element_text(color = "transparent")) + 
+             theme(axis.text.y.left = element_text(color = "darkblue"),
+                   axis.ticks.y.left = element_line(color = "darkblue"),
+                   axis.title.y.left = element_text(color = "darkblue"),
+                   axis.line.y.left = element_line(color = "darkblue")),
            
            "TRUE" =   gom_coast %>% mutate(Year = year(t), yrday = yday(t)) %>% 
              filter(yrday %in% c(60:121)) %>% 
              group_by(Year) %>% summarise(Avg = mean(Avg, na.rm =TRUE), .groups = "drop") %>% 
              left_join(gom_strt, by = "Year") %>% 
-             ggplot() + geom_line(aes(x = Year, y = Avg), size = 4) +
-             geom_line(aes(x = Year, y = (43 - pwrDstrt2/7)+23), col = "red", size = 4) +
+             ggplot() + geom_line(aes(x = Year, y = Avg), size = 4, color = "darkblue") +
+             geom_line(aes(x = Year, y = (43 - pwrDstrt2/7)+23), col = "darkred", size = 4) +
              scale_y_continuous(name = "Sea Surface Temperature (deg F)", 
                                 limits = c(37,43),
                                 sec.axis = sec_axis(~((43 - (.-23))*7), name = "Transition Day",
                                                     breaks = c(seq(135,230,5)), 
                                                     labels = c("15-May","20-May","25-May","30-May","04-Jun","09-Jun","14-Jun","19-Jun", "24-Jun", 
                                                                "29-Jun", "04-Jul", "09-Jul", "14-Jul", 
-                                                               "19-Jul", "24-Jul", "29-Jul", "03-Aug", "08-Aug", "13-Aug", "18-Aug")))
+                                                               "19-Jul", "24-Jul", "29-Jul", "03-Aug", "08-Aug", "13-Aug", "18-Aug"))) +
+             theme(axis.text.y.right = element_text(color = "darkred"),
+                   axis.ticks.y.right = element_line(color = "darkred"),
+                   axis.title.y.right = element_text(color = "darkred"),
+                   axis.line.y.left = element_line(color = "darkred")) + 
+             theme(axis.text.y.left = element_text(color = "darkblue"),
+                   axis.ticks.y.left = element_line(color = "darkblue"),
+                   axis.title.y.left = element_text(color = "darkblue"),
+                   axis.line.y.left = element_line(color = "darkblue"))
            
     )
   })
@@ -1040,7 +1144,8 @@ server <- function(input, output, session) {
                          labels = c("Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec")) +
       geom_vline(aes(xintercept = pwrDstrt2, col = as.factor(Year)), size = 3) +
       geom_segment(aes(x = 191, y = 5.5, xend = 166, yend = 5.5, colour = "segment"),
-                   arrow = arrow(), color = "black")
+                   arrow = arrow(), color = "red", size = 2) +
+      scale_color_manual(values=c("#88A2AA","#0F1A20"))
   })
   
   
@@ -1176,7 +1281,7 @@ server <- function(input, output, session) {
     }
       
     if(input$actual){
-      plot1 <-  plot1 + geom_vline(aes(xintercept = pwrDstrt2), col = "red", size = 3)
+      plot1 <-  plot1 + geom_vline(aes(xintercept = pwrDstrt2), col = "darkred", size = 3)
     }
     
     print(plot1)
@@ -1187,26 +1292,50 @@ server <- function(input, output, session) {
   ################################ POP_LANDINGS PLOT #################
   
   output$multidecade <- renderPlot({
-    switch(input$pop_landings,
+    
+    switch(input$gom_select,
+           "gom" =     switch(input$pop_landings,
+                              
+                              "land" = gom_lob_data %>% 
+                                filter(Model == "CMIP5_RCP 8.5_mean") %>% 
+                                ggplot() + 
+                                geom_point(aes(Year, Landings), size = 3, color = "darkred") + 
+                                geom_line(aes(Year, Landings_pred), color = "#CD5C5C", size = 2) +
+                                geom_ribbon(aes(x = Year, ymax = upr, ymin = lwr), fill = "#CD5C5C", alpha = .1) + 
+                                theme(legend.position = c(.85,.85)) +
+                                labs(y = "Landings (millions of pounds)") +
+                                scale_x_continuous(limits = c(1982,2050)),
+                              
+                              "pop" = gom_lob_data %>% filter(Model == "CMIP5_RCP 8.5_mean") %>% ggplot() + 
+                                geom_point(aes(Year, Abundance), size = 3, color = "darkred") +
+                                geom_line(aes(Year, Average), size = 2, color = "#CD5C5C") +
+                                geom_ribbon(aes(x = Year, ymax = Average + Std*2, ymin = Average - Std*2), fill = "#CD5C5C", alpha = .1) + 
+                                theme(legend.position = c(.85,.85)) +
+                                labs(y = "Population (millions of individuals)") +
+                                scale_x_continuous(limits = c(1982,2050))
+           ),
            
-           "land" = lob_pop_proj %>% 
-             filter(Model == "CMIP5_RCP 8.5_mean") %>% 
-             ggplot() + 
-             geom_point(aes(Year, Landings), size = 3) + 
-             geom_line(aes(Year, Landings_pred), color = "blue", size = 2) +
-             geom_ribbon(aes(x = Year, ymax = upr, ymin = lwr), fill = "blue", alpha = .1) + 
-             theme(legend.position = c(.85,.85)) +
-             labs(y = "Landings (millions of pounds)") +
-             scale_x_continuous(limits = c(1982,2050)),
-           
-           "pop" = lob_pop_proj %>% filter(Model == "CMIP5_RCP 8.5_mean") %>% ggplot() + 
-             geom_line(aes(Year, Average), size = 2, color = "red") +
-             geom_point(aes(Year, Abundance), size = 3) +
-             geom_ribbon(aes(x = Year, ymax = Average + Std*2, ymin = Average - Std*2), fill = "red", alpha = .1) + 
-             theme(legend.position = c(.85,.85)) +
-             labs(y = "Population (millions of individuals)") +
-             scale_x_continuous(limits = c(1982,2050))
+           "sne" =       switch(input$pop_landings,
+                                
+                                "land" = sne_lob_data %>% 
+                                  filter(Model == "CMIP5_RCP 8.5_mean") %>% 
+                                  ggplot() + 
+                                  geom_point(aes(Year, Landings), size = 3, color = "darkred") + 
+                                  geom_line(aes(Year, Landings_pred), color = "#CD5C5C", size = 2) +
+                                  geom_ribbon(aes(x = Year, ymax = upr, ymin = lwr), fill = "#CD5C5C", alpha = .1) + 
+                                  theme(legend.position = c(.85,.85)) +
+                                  labs(y = "Landings (millions of pounds)") +
+                                  scale_x_continuous(limits = c(1982,2050)),
+                                
+                                "pop" = sne_lob_data %>% filter(Model == "CMIP5_RCP 8.5_mean") %>% ggplot() + 
+                                  geom_point(aes(Year, Abundance), size = 3, color = "darkred") +
+                                  geom_line(aes(Year, Average), size = 2, color = "#CD5C5C") +
+                                  geom_ribbon(aes(x = Year, ymax = Average + Std*2, ymin = Average - Std*2), fill = "#CD5C5C", alpha = .1) + 
+                                  theme(legend.position = c(.85,.85)) +
+                                  labs(y = "Population (millions of individuals)") +
+                                  scale_x_continuous(limits = c(1982,2050))
            )
+    )
   })
   
   #################################### temp_landings_trends #############
@@ -1215,34 +1344,83 @@ server <- function(input, output, session) {
     
     on_off <- paste(input$cmip_proj)
     
-    switch (on_off,
-      "FALSE" = gom_oisst_df %>%
-        left_join(., yr_lob_landings, by = "Year") %>% 
-        filter(Year >1981, Year < 2020) %>% 
-        ggplot() + geom_line(aes(x = Year, y = Avg), size = 3, col = "darkblue") +
-        geom_point(aes(x = Year, y = `pounds(millions)`/20+57.5), size = 3, color = "gray15") +
-        scale_y_continuous(sec.axis = sec_axis(~(.-57.5)*20, breaks = c(25,50,75,100, 125), 
-                                               labels = c(25,50,75,100, 125), name = "Landings (millions of pounds)")) +
-        labs(y = "Sea Surface Temperature (deg F)") +
-        theme(axis.title.y.left = element_text(color = "darkblue"),
-              axis.ticks.y.left = element_line(color = "darkblue"),
-              axis.text.y.left = element_text(color = "darkblue"),
-              axis.line.y.left = element_line(color = "darkblue")),
-      
-      "TRUE" = gom_oisst_df %>% 
-        left_join(., yr_lob_landings, by = "Year") %>% 
-        right_join(cmipsst, by = "Year") %>% filter(Year < 2051) %>%  ggplot() + geom_line(aes(Year, Mean), size = 3, col = "deepskyblue") +
-        geom_ribbon(aes(x = Year, ymin = low, ymax = high), fill = "deepskyblue", alpha = .15) +
-        labs(y = "Sea Surface Temperature (deg F)") + geom_line(aes(x = Year, y = Avg), size = 3, col = "darkblue") +
-        geom_point(aes(x = Year, y = `pounds(millions)`/20+57.5), size = 3, color = "gray15") +
-        scale_y_continuous(sec.axis = sec_axis(~(.-57.5)*20, breaks = c(25,50,75,100, 125), 
-                                               labels = c(25,50,75,100, 125), name = "Landings (millions of pounds)")) +
-        labs(y = "Sea Surface Temperature (deg F)") +
-        theme(axis.title.y.left = element_text(color = "darkblue"),
-              axis.ticks.y.left = element_line(color = "darkblue"),
-              axis.text.y.left = element_text(color = "darkblue"),
-              axis.line.y.left = element_line(color = "darkblue"))
-    )
+    switch(input$sne_select,
+           "gom" =     switch (on_off,
+                               "FALSE" = gom_oisst_df %>%
+                                 left_join(., gom_landings_yr, by = "Year") %>% 
+                                 filter(Year >1981, Year < 2020) %>% 
+                                 ggplot() + geom_line(aes(x = Year, y = Avg), size = 3, col = "darkblue") +
+                                 geom_point(aes(x = Year, y = Landings/20+57.5), size = 3, color = "darkred") +
+                                 scale_y_continuous(sec.axis = sec_axis(~(.-57.5)*20, breaks = c(25,50,75,100, 125, 150), 
+                                                                        labels = c(25,50,75,100, 125, 150), name = "Landings (millions of pounds)")) +
+                                 labs(y = "Sea Surface Temperature (deg F)") +
+                                 theme(axis.title.y.left = element_text(color = "darkblue"),
+                                       axis.ticks.y.left = element_line(color = "darkblue"),
+                                       axis.text.y.left = element_text(color = "darkblue"),
+                                       axis.line.y.left = element_line(color = "darkblue"),
+                                       axis.title.y.right = element_text(color = "darkred"),
+                                       axis.ticks.y.right = element_line(color = "darkred"),
+                                       axis.text.y.right = element_text(color = "darkred"),
+                                       axis.line.y.right = element_line(color = "darkred")),
+                               
+                               "TRUE" = gom_oisst_df %>% 
+                                 left_join(., gom_landings_yr, by = "Year") %>% 
+                                 right_join(cmipsst, by = "Year") %>% filter(Year < 2051) %>%  
+                                 ggplot() + geom_line(aes(Year, Mean), size = 3, col = "deepskyblue") +
+                                 geom_ribbon(aes(x = Year, ymin = low, ymax = high), fill = "deepskyblue", alpha = .15) +
+                                 labs(y = "Sea Surface Temperature (deg F)") + geom_line(aes(x = Year, y = Avg), size = 3, col = "darkblue") +
+                                 geom_point(aes(x = Year, y = Landings/20+57.5), size = 3, color = "darkred") +
+                                 scale_y_continuous(sec.axis = sec_axis(~(.-57.5)*20, breaks = c(25,50,75,100, 125, 150), 
+                                                                        labels = c(25,50,75,100, 125, 150), name = "Landings (millions of pounds)")) +
+                                 labs(y = "Sea Surface Temperature (deg F)") +
+                                 theme(axis.title.y.left = element_text(color = "darkblue"),
+                                       axis.ticks.y.left = element_line(color = "darkblue"),
+                                       axis.text.y.left = element_text(color = "darkblue"),
+                                       axis.line.y.left = element_line(color = "darkblue"),
+                                       axis.title.y.right = element_text(color = "darkred"),
+                                       axis.ticks.y.right = element_line(color = "darkred"),
+                                       axis.text.y.right = element_text(color = "darkred"),
+                                       axis.line.y.right = element_line(color = "darkred"))
+           ),
+           "sne" =     switch (on_off,
+                               "FALSE" = sne_oisst_df %>%
+                                 left_join(., sne_landings_yr, by = "Year") %>% 
+                                 filter(Year >1981, Year < 2020) %>% 
+                                 ggplot() + geom_line(aes(x = Year, y = Avg), size = 3, col = "darkblue") +
+                                 geom_point(aes(x = Year, y = Landings/5+66), size = 3, color = "darkred") +
+                                 scale_y_continuous(sec.axis = sec_axis(~(.-66)*5, breaks = c(0,10,20,30,40,50), 
+                                                                        labels = c(0,10,20,30,40,50), name = "Landings (millions of pounds)")) +
+                                 labs(y = "Sea Surface Temperature (deg F)") +
+                                 theme(axis.title.y.left = element_text(color = "darkblue"),
+                                       axis.ticks.y.left = element_line(color = "darkblue"),
+                                       axis.text.y.left = element_text(color = "darkblue"),
+                                       axis.line.y.left = element_line(color = "darkblue"),
+                                       axis.title.y.right = element_text(color = "darkred"),
+                                       axis.ticks.y.right = element_line(color = "darkred"),
+                                       axis.text.y.right = element_text(color = "darkred"),
+                                       axis.line.y.right = element_line(color = "darkred")),
+                               
+                               "TRUE" = sne_oisst_df %>% 
+                                 left_join(., sne_landings_yr, by = "Year") %>% 
+                                 right_join(cmipsst_sne, by = "Year") %>% filter(Year < 2051) %>%  
+                                 ggplot() + geom_line(aes(Year, Mean), size = 3, col = "deepskyblue") +
+                                 geom_ribbon(aes(x = Year, ymin = low, ymax = high), fill = "deepskyblue", alpha = .15) +
+                                 labs(y = "Sea Surface Temperature (deg F)") + geom_line(aes(x = Year, y = Avg), size = 3, col = "darkblue") +
+                                 geom_point(aes(x = Year, y = Landings/5+66), size = 3, color = "darkred") +
+                                 scale_y_continuous(sec.axis = sec_axis(~(.-66)*5, breaks = c(0,10,20,30,40,50), 
+                                                                        labels = c(0,10,20,30,40,50), name = "Landings (millions of pounds)")) +
+                                 labs(y = "Sea Surface Temperature (deg F)") +
+                                 theme(axis.title.y.left = element_text(color = "darkblue"),
+                                       axis.ticks.y.left = element_line(color = "darkblue"),
+                                       axis.text.y.left = element_text(color = "darkblue"),
+                                       axis.line.y.left = element_line(color = "darkblue"),
+                                       axis.title.y.right = element_text(color = "darkred"),
+                                       axis.ticks.y.right = element_line(color = "darkred"),
+                                       axis.text.y.right = element_text(color = "darkred"),
+                                       axis.line.y.right = element_line(color = "darkred"))
+           ))
+    
+
   })
   
   
@@ -1276,10 +1454,15 @@ server <- function(input, output, session) {
                                    "#76a1a0",
                                    "#97c8f0"), guide = "none")
     
+    vals <- multi_year %>% left_join(yr_zone_landings, by = c("Year", "Zone")) %>% 
+      filter(`forecast year` == 2019, Zone == input$study_area) %>% 
+      pivot_longer(cols = c(-Year, -`forecast year`, -run, -Zone), names_to = "name", values_to = "value") %>% 
+      dplyr::summarise(max_val = max(value, na.rm = TRUE),
+                       min_val = min(value, na.rm = TRUE))
     
-    
-    plot_together <- plot_forecast
-    print(plot_inset, vp = grid::viewport(x = 0.31, y = 0.8, width = 0.3, height = 0.3))
+    plot_together <- plot_forecast + annotation_custom(ggplotGrob(plot_inset),
+                                                       xmax = 2005,
+                                                       ymin = vals$max_val - (vals$max_val - vals$min_val)*.32)
     
     return(plot_together)
 
@@ -1343,9 +1526,11 @@ server <- function(input, output, session) {
             strip.background = element_blank(),
             strip.text = element_text(size = 14)) +
       labs(x = "Year", y = "Landings (millions of pounds)") + 
-      scale_fill_manual(values = c("hindcast" = "deepskyblue", "forecast" = "darkorange"), name = "", guide = guide_legend(reverse = TRUE)) +
+      scale_fill_manual(values = c("hindcast" = "deepskyblue", "forecast" = "darkorange"), 
+                        name = "", guide = guide_legend(reverse = TRUE)) +
       scale_alpha_discrete(range = c(.5,1), guide = "none") +
-      facet_wrap(~Zone, scales = "free_y", labeller = labeller(Zone = c("A" = "Zone A", "B" = "Zone B","C" = "Zone C","D"= "Zone D",
+      facet_wrap(~Zone, scales = "free_y", labeller = labeller(Zone = c("A" = "Zone A", "B" = "Zone B",
+                                                                        "C" = "Zone C","D"= "Zone D",
                                                                         "E" = "Zone E", "F" = "Zone F"))) +
       scale_x_continuous(limits = c(2000,2025))
   })

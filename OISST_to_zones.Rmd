@@ -1,0 +1,167 @@
+---
+title: "OISST for lob zones"
+author: "Matt Dzaugis"
+date: "8/14/2019"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+# The three packages we will need
+library(dplyr)
+library(rerddap)
+library(ncdf4)
+library(sf)
+library(lubridate)
+library(tidyverse)
+library(raster)
+library(rgdal)
+
+```
+
+## Get info for OISST
+
+Use the current date for most recent data
+
+```{r getting the data, echo = FALSE}
+# The information for the NOAA OISST data
+info(datasetid = "ncdc_oisst_v2_avhrr_by_time_zlev_lat_lon", url = "https://www.ncei.noaa.gov/erddap/")
+```
+
+## Functions
+
+```{r getting the average of the scenarios, echo=FALSE}
+# This function expects the user to provide it with two values 
+# that match the time format of the target OISST dataset
+make360 <- function(lon) {
+  ## Details
+  # This is a simple function to translate negative longitudes (measured on -180:180 scale) into 0-360, which is coordinate system used by some environmental datasets.
+  
+  # Args:
+  # lon = Longitude in -180:180 degrees
+  
+  # Returns: 0 to 360 longitude
+  
+  ## Start function
+  
+  ind <- which(lon < 0)
+  lon[ind] <- lon[ind] + 360
+  return(lon)
+  
+  ## End function
+}
+
+OISST_sub <- function(times){
+  oisst_res <- griddap(x = "ncdc_oisst_v2_avhrr_by_time_zlev_lat_lon", 
+                       url = "https://www.ncei.noaa.gov/erddap/", 
+                        time = times, 
+                        depth = c(0, 0),
+                        latitude = c(39.5, 46.5),
+                        longitude = c(288.5, 297.5),
+                        fields = "sst")
+}
+
+
+OISST1 <- OISST_sub(c("1981-09-01T00:00:00Z", "1990-12-31T00:00:00Z"))
+OISST2 <- OISST_sub(c("1991-01-01T00:00:00Z", "1999-12-31T00:00:00Z"))
+OISST3 <- OISST_sub(c("2000-01-01T00:00:00Z", "2008-12-31T00:00:00Z"))
+OISST4 <- OISST_sub(c("2009-01-01T00:00:00Z", "2013-12-03T00:00:00Z"))
+OISST5 <- OISST_sub(c("2014-01-01T00:00:00Z", "2020-02-28T00:00:00Z"))
+```
+
+Note that the `echo = FALSE` parameter was added to the code chunk to prevent printing of the R code that generated the plot.
+
+```{r putting into an r data file, echo = FALSE}
+
+OISST_prep <- function(nc_file){
+  
+  # Open the NetCDF connection
+  nc <- nc_open(nc_file$summary$filename)
+  
+  # Extract the SST values and add the lon/lat/time dimension names
+  res <- ncvar_get(nc, varid = "sst")
+  dimnames(res) <- list(lon = nc$dim$longitude$vals,
+                        lat = nc$dim$latitude$vals,
+                        t = nc$dim$time$vals)
+  
+  # Convert the data into a 'long' dataframe for use in the 'tidyverse' ecosystem
+  res <- as.data.frame(reshape2::melt(res, value.name = "temp"), row.names = NULL) %>% 
+    mutate(t = as.Date(as.POSIXct(t, origin = "1970-01-01 00:00:00")),
+           temp = round(temp, 2))
+  
+  # Close the NetCDF connection and finish
+  nc_close(nc)
+  return(res)
+}
+
+```
+
+```{r forecast graphs, echo=FALSE}
+# Prep the data
+OISST1_prep <- OISST_prep(OISST1)
+OISST2_prep <- OISST_prep(OISST2)
+OISST3_prep <- OISST_prep(OISST3)
+OISST4_prep <- OISST_prep(OISST4)
+OISST5_prep <- OISST_prep(OISST5)
+
+# Bind them together
+OISST_all <- rbind(OISST1_prep, OISST2_prep, OISST3_prep, OISST4_prep, OISST5_prep)
+
+```
+
+```{r get lob zone means, echo=FALSE}
+lobzone <- readOGR("Data/Lob_zone_sf.shp")
+
+# get coordinates for each zone polygon
+# (not sure why zones are in a weird order...)
+zoneB<-lobzone@polygons[[1]]@Polygons[[1]]@coords
+zoneA<-lobzone@polygons[[2]]@Polygons[[1]]@coords
+zoneG<-lobzone@polygons[[3]]@Polygons[[1]]@coords
+zoneF<-lobzone@polygons[[4]]@Polygons[[1]]@coords
+zoneE<-lobzone@polygons[[5]]@Polygons[[1]]@coords
+zoneD<-lobzone@polygons[[6]]@Polygons[[1]]@coords
+zoneC<-lobzone@polygons[[7]]@Polygons[[1]]@coords
+
+```
+
+```{r fs}
+OISST_all$lon <- OISST_all$lon - 360
+
+xy <- OISST_all[,c(1,2)]
+point_df <- SpatialPointsDataFrame(coords = xy, data = OISST_all,
+                               proj4string = CRS("+proj=longlat +datum=NAD83 +no_defs +ellps=GRS80 +towgs84=0,0,0"))
+ 
+convert_polygon <- function(zone){
+  zone <- SpatialPolygons(list(Polygons(list(Polygon(zone)), ID =1)))
+  crs(zone) <- CRS("+proj=longlat +datum=NAD83 +no_defs +ellps=GRS80 +towgs84=0,0,0")
+  zone_temp <- over(point_df, zone)
+  zone_temp <- point_df[zone_temp == 1 & !is.na(zone_temp),]
+  zone_temp <- as.data.frame(zone_temp)
+  zone_temp <- zone_temp %>% group_by(t) %>% summarise(zone_avg = mean(temp, na.rm =TRUE)) %>% ungroup()
+  return(zone_temp)
+}
+
+zoneA_temp <- convert_polygon(zoneA)
+zoneB_temp <- convert_polygon(zoneB)
+zoneC_temp <- convert_polygon(zoneC)
+zoneD_temp <- convert_polygon(zoneD)
+zoneE_temp <- convert_polygon(zoneE)
+zoneF_temp <- convert_polygon(zoneF)
+zoneG_temp <- convert_polygon(zoneG)
+
+x <- rep(c("G"), 13844) # length of zoneX_temp
+
+zoneA_temp <- add_column(zoneA_temp, zone = x)
+zoneB_temp <- add_column(zoneB_temp, zone = x)
+zoneC_temp <- add_column(zoneC_temp, zone = x)
+zoneD_temp <- add_column(zoneD_temp, zone = x)
+zoneE_temp <- add_column(zoneE_temp, zone = x)
+zoneF_temp <- add_column(zoneF_temp, zone = x)
+zoneG_temp <- add_column(zoneG_temp, zone = x)
+
+All_Zone_avgs <- bind_rows(zoneA_temp, zoneB_temp) %>% bind_rows(., zoneC_temp) %>% bind_rows(., zoneD_temp) %>% bind_rows(., zoneE_temp) %>% bind_rows(., zoneF_temp) %>% bind_rows(., zoneG_temp)
+
+write_csv(All_Zone_avgs, "Data/All_Zone_avgs.csv")
+```
+
+
