@@ -106,7 +106,9 @@ zone_strt_temp_all <-  All_Zone_avgs %>% mutate(yr = year(t), yrday = yday(t)) %
 # other shapefiles
 gom_shp <- st_read("Data/GoM_combined_sp.shp") %>% st_transform(crs = '+proj=longlat +datum=WGS84') 
 sne_shp <- st_read("Data/Southern_New_England_Management_Area.shp") %>% st_transform(crs = '+proj=longlat +datum=WGS84') 
-multi_year_shp <- st_read("Data/Lob_zone_sf.shp") %>% st_transform(crs = '+proj=longlat +datum=WGS84') 
+multi_year_shp <- st_read("Data/Lob_zone_sf.shp") %>% 
+  st_transform(crs = '+proj=longlat +datum=WGS84') %>% filter(ZONEID != "G")
+
 # monthly lobster landings by zone
 lob_zone_landing <- read_csv("Data/lob_zone.csv")
 
@@ -900,7 +902,13 @@ server <- function(input, output, session) {
                   highlightOptions = highlightOptions(color = "white", 
                                                       weight = 2, bringToFront = TRUE),
                   label = ~paste("Zone", ZONEID, sep = " "),
-                  group = "Seasonal and Multi-year") %>% 
+                  group = "Seasonal") %>% 
+      addPolygons(data = multi_year_shp, fillColor = ~factpal(ZONEID), 
+                  color = "transparent", fillOpacity = 1,
+                  highlightOptions = highlightOptions(color = "white", 
+                                                      weight = 2, bringToFront = TRUE),
+                  label = ~paste("Zone", ZONEID, sep = " "),
+                  group = "Multi-year") %>% 
       addLegend(colors = c("#25356f","#cb9d00","#961e1d","#b3875a","#ffd380","#76a1a0","#97c8f0"), 
                 labels = c("A","B","C", "D", "E", "F", "G"),
                 title = "Management zones",
@@ -912,7 +920,7 @@ server <- function(input, output, session) {
                 position = "topleft",
                 group = "Multi-decadal") %>% 
       addLayersControl(
-        baseGroups = c("Seasonal and Multi-year", "Multi-decadal"),
+        baseGroups = c("Seasonal", "Multi-year", "Multi-decadal"),
         options = layersControlOptions(collapsed = FALSE)) %>% 
       leaflet.extras::suspendScroll()})
   
