@@ -900,7 +900,7 @@ server <- function(input, output, session) {
                   highlightOptions = highlightOptions(color = "white", 
                                                       weight = 2, bringToFront = TRUE),
                   label = ~paste("Zone", ZONEID, sep = " "),
-                  group = "Seasonal") %>% 
+                  group = "Seasonal and Multi-year") %>% 
       addLegend(colors = c("#25356f","#cb9d00","#961e1d","#b3875a","#ffd380","#76a1a0","#97c8f0"), 
                 labels = c("A","B","C", "D", "E", "F", "G"),
                 title = "Management zones",
