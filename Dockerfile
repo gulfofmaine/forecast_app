@@ -22,10 +22,17 @@ RUN install2.r --error \
     rgeos \
     sf 
 
-#copy the current folder into the path of the app
-COPY . /usr/local/src/app
-#set working directory to the app
-WORKDIR /usr/local/src/app
+# Shiny Server Customizations.
+COPY shiny-customized.config /etc/shiny-server/shiny-server.conf
+COPY shiny_logs /var/log/shiny-server
 
-#set the unix commands to run the app
-CMD ["Rscript","app_run.R"]
+# Copy the current folder into the path of the app
+COPY . /srv/shiny-server
+
+# Set working directory to the app
+WORKDIR /srv/shiny-server
+
+EXPOSE 3838
+
+# Set the unix commands to run the app
+CMD ["R", "-e","shiny::runApp('app.R', launch.browser = FALSE, port = 3838, host = '0.0.0.0')"]
